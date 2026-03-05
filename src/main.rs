@@ -1,5 +1,10 @@
-#![warn(clippy::all, rust_2018_idioms)]
+#![deny(clippy::all)]
+#![warn(clippy::pedantic)]
+#![warn(rust_2018_idioms)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
+
+mod app;
+use app::App;
 
 // When compiling natively:
 #[cfg(not(target_arch = "wasm32"))]
@@ -18,9 +23,9 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     eframe::run_native(
-        "eframe template",
+        "shatter",
         native_options,
-        Box::new(|cc| Ok(Box::new(eframe_template::TemplateApp::new(cc)))),
+        Box::new(|cc| Ok(Box::new(App::new(cc)))),
     )
 }
 
@@ -50,7 +55,7 @@ fn main() {
             .start(
                 canvas,
                 web_options,
-                Box::new(|cc| Ok(Box::new(eframe_template::TemplateApp::new(cc)))),
+                Box::new(|cc| Ok(Box::new(App::new(cc)))),
             )
             .await;
 
