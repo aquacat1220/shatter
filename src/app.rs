@@ -1,8 +1,10 @@
-/// We derive Deserialize/Serialize so we can persist app state on shutdown.
-#[derive(serde::Deserialize, serde::Serialize, Default)]
-#[serde(default)] // if we add new fields, give them default values when deserializing old state
+use shatter::*;
+
+#[derive(Debug, Default)]
 pub struct App {
     tick: u32,
+    world: World,
+    engine: Engine,
 }
 
 impl App {
@@ -11,22 +13,11 @@ impl App {
         // This is also where you can customize the look and feel of egui using
         // `cc.egui_ctx.set_visuals` and `cc.egui_ctx.set_fonts`.
 
-        // Load previous app state (if any).
-        // Note that you must enable the `persistence` feature for this to work.
-        if let Some(storage) = cc.storage {
-            eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default()
-        } else {
-            App::default()
-        }
+        Default::default()
     }
 }
 
 impl eframe::App for App {
-    /// Called by the framework to save state before shutdown.
-    fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        eframe::set_value(storage, eframe::APP_KEY, self);
-    }
-
     /// Called each time the UI needs repainting, which may be many times per second.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -50,15 +41,27 @@ impl eframe::App for App {
                 ui.allocate_painter(egui::Vec2::new(150.0, 200.0), egui::Sense::empty());
             let rect = response.rect;
             let c = rect.center();
-            let r = rect.width() / 2.0 - 10.0;
-            painter.circle(
-                c,
-                r,
-                egui::Color32::CYAN,
-                egui::Stroke::new(2.0, egui::Color32::MAGENTA),
-            );
+
+            for handle in self.world.body_handles() {
+                let body = self.world.body(handle).unwrap();
+                let pos = body.position();
+                match body.shape() {
+                    math::Shape::Circle(circle) => {
+                        let r = circle.radius;
+                        painter.circle(
+                            egui::Pos2::new(c.x + pos.x, c.y + pos.y),
+                            r,
+                            egui::Color32::CYAN,
+                            egui::Stroke::new(2.0, egui::Color32::MAGENTA),
+                        );
+                    }
+                }
+            }
+
             ui.label(response.rect.to_string());
             ui.label("Text after painter");
+
+            self.engine.tick(&mut self.world, 0.1);
             ctx.request_repaint();
         });
     }
