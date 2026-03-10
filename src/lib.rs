@@ -8,4 +8,5 @@ pub mod math;
 pub mod world;
 
 pub use engine::Engine;
-pub use world::*;
+pub use event::Event;
+pub use world::{BodyHandle, BodyView, World};

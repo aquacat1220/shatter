@@ -61,7 +61,7 @@ impl eframe::App for App {
             ui.label(response.rect.to_string());
             ui.label("Text after painter");
 
-            self.engine.tick(&mut self.world, 0.1);
+            let _events = self.engine.tick(&mut self.world, 0.1);
             ctx.request_repaint();
         });
     }
