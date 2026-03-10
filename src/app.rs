@@ -24,30 +24,38 @@ impl App {
         // `cc.egui_ctx.set_visuals` and `cc.egui_ctx.set_fonts`.
 
         let mut world: World = Default::default();
-        world.add_body(
-            math::Vec2::new(0.0, 0.0),
-            math::Vec2::new(0.0, 0.0),
-            1.0,
-            math::Shape::Circle(math::Circle::new(0.25).unwrap()),
-        );
-        world.add_body(
-            math::Vec2::new(1.0, 0.0),
-            math::Vec2::new(0.0, 0.0),
-            1.0,
-            math::Shape::Circle(math::Circle::new(0.15).unwrap()),
-        );
-        world.add_body(
-            math::Vec2::new(0.0, 1.0),
-            math::Vec2::new(0.0, 0.0),
-            1.0,
-            math::Shape::Circle(math::Circle::new(0.15).unwrap()),
-        );
-        world.add_body(
-            math::Vec2::new(2.0, 2.0),
-            math::Vec2::new(0.0, 0.0),
-            1.0,
-            math::Shape::Circle(math::Circle::new(0.35).unwrap()),
-        );
+        world
+            .add_body(
+                math::Vec2::new(0.0, 0.0),
+                math::Vec2::new(0.1, 0.0),
+                1.0,
+                math::Shape::Circle(math::Circle::new(0.25).unwrap()),
+            )
+            .unwrap();
+        world
+            .add_body(
+                math::Vec2::new(1.0, 0.0),
+                math::Vec2::new(0.0, 0.1),
+                1.0,
+                math::Shape::Circle(math::Circle::new(0.15).unwrap()),
+            )
+            .unwrap();
+        world
+            .add_body(
+                math::Vec2::new(0.0, 1.0),
+                math::Vec2::new(0.1, -0.1),
+                1.0,
+                math::Shape::Circle(math::Circle::new(0.15).unwrap()),
+            )
+            .unwrap();
+        world
+            .add_body(
+                math::Vec2::new(2.0, 2.0),
+                math::Vec2::new(-0.1, 0.0),
+                1.0,
+                math::Shape::Circle(math::Circle::new(0.35).unwrap()),
+            )
+            .unwrap();
         App {
             tick: 0,
             ticks_per_second: 100.0,

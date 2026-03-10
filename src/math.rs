@@ -5,20 +5,20 @@ pub struct Vec2 {
 }
 
 impl Vec2 {
+    pub const ZERO: Self = Self { x: 0.0, y: 0.0 };
+    pub const RIGHT: Self = Self { x: 1.0, y: 0.0 };
+    pub const UP: Self = Self { x: 0.0, y: 1.0 };
+
     pub fn new(x: f32, y: f32) -> Self {
         Self { x, y }
     }
 
-    pub fn zero() -> Self {
-        Self { x: 0.0, y: 0.0 }
+    pub fn length(&self) -> f32 {
+        (self.x.powi(2) + self.y.powi(2)).sqrt()
     }
 
-    pub fn right() -> Self {
-        Self { x: 1.0, y: 0.0 }
-    }
-
-    pub fn up() -> Self {
-        Self { x: 0.0, y: 1.0 }
+    pub fn length_squared(&self) -> f32 {
+        self.x.powi(2) + self.y.powi(2)
     }
 }
 
@@ -52,6 +52,27 @@ impl std::ops::Mul<f32> for Vec2 {
             x: self.x * scalar,
             y: self.y * scalar,
         }
+    }
+}
+
+impl std::ops::AddAssign for Vec2 {
+    fn add_assign(&mut self, other: Self) {
+        self.x += other.x;
+        self.y += other.y;
+    }
+}
+
+impl std::ops::SubAssign for Vec2 {
+    fn sub_assign(&mut self, other: Self) {
+        self.x -= other.x;
+        self.y -= other.y;
+    }
+}
+
+impl std::ops::MulAssign<f32> for Vec2 {
+    fn mul_assign(&mut self, scalar: f32) {
+        self.x *= scalar;
+        self.y *= scalar;
     }
 }
 

@@ -14,7 +14,7 @@ pub struct WorldId(u32);
 
 #[derive(Debug)]
 pub struct World {
-    world_id: WorldId,
+    pub(crate) world_id: WorldId,
     pub(crate) bodies: SlotMap<BodyKey, Body>,
     pub(crate) colliders: SlotMap<ColliderKey, Collider>,
 }
@@ -54,21 +54,28 @@ impl World {
         velocity: Vec2,
         mass: f32,
         shape: Shape,
-    ) -> BodyHandle {
-        let collider = Collider { shape };
+    ) -> Result<BodyHandle, &'static str> {
+        if mass < 0.000_000_001 {
+            return Err("Mass is too small.");
+        }
+        let collider = Collider {
+            body_key: Default::default(),
+            shape,
+        };
         let collider_key = self.colliders.insert(collider);
         let body = Body {
             position,
             velocity,
-            accumulated_impulse: Vec2::zero(),
-            mass,
+            accumulated_impulse: Vec2::ZERO,
+            inverse_mass: 1.0 / mass,
             collider_key,
         };
         let body_key = self.bodies.insert(body);
-        BodyHandle {
+        self.colliders.get_mut(collider_key).unwrap().body_key = body_key; // Safety: We've just inserted the collider to the slotmap.
+        Ok(BodyHandle {
             world_id: self.world_id,
             body_key,
-        }
+        })
     }
 }
 
@@ -89,8 +96,8 @@ impl Default for World {
 /// Instead we return `BodyHandle`s in every body-related API as a "handle" to the actual body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BodyHandle {
-    world_id: WorldId,
-    body_key: BodyKey,
+    pub(crate) world_id: WorldId,
+    pub(crate) body_key: BodyKey,
 }
 
 /// An immutable view to a specific body in the world.
@@ -100,8 +107,8 @@ pub struct BodyHandle {
 /// Instead, the user does `let body_view = world.body(body_handle);`, and use the `body_view` object to interact with bodies.
 #[derive(Debug, Clone, Copy)]
 pub struct BodyView<'a> {
-    world: &'a World,
-    body_key: BodyKey,
+    pub(crate) world: &'a World,
+    pub(crate) body_key: BodyKey,
     // TODO: Cache the result of `body()` and reuse it for following `position()` / `velocity()` call.
 }
 
@@ -124,7 +131,7 @@ impl BodyView<'_> {
     }
 
     pub fn mass(&self) -> f32 {
-        self.body().mass
+        1.0 / self.body().inverse_mass
     }
 
     pub fn shape(&self) -> Shape {
