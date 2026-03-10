@@ -6,6 +6,6 @@ pub struct Engine {}
 
 impl Engine {
     pub fn tick(&mut self, world: &mut World, dt: f32) -> Vec<Event> {
-        vec![]
+        vec![Event::DummyEvent]
     }
 }
