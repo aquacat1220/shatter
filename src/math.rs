@@ -8,6 +8,18 @@ impl Vec2 {
     pub fn new(x: f32, y: f32) -> Self {
         Self { x, y }
     }
+
+    pub fn zero() -> Self {
+        Self { x: 0.0, y: 0.0 }
+    }
+
+    pub fn right() -> Self {
+        Self { x: 1.0, y: 0.0 }
+    }
+
+    pub fn up() -> Self {
+        Self { x: 0.0, y: 1.0 }
+    }
 }
 
 impl std::ops::Add for Vec2 {
