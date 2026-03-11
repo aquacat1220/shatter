@@ -2,6 +2,9 @@ use core::f32;
 
 use shatter::*;
 
+// We start to display a warning when we lag more than `ACCEPTABLE_TICK_ERROR` ticks behind.
+const ACCEPTABLE_TICK_ERROR: f32 = 5.0;
+
 #[derive(Debug)]
 pub struct App {
     tick: u32,
@@ -99,13 +102,15 @@ impl eframe::App for App {
                             .text("speed multiplier")
                             .logarithmic(true),
                     );
+                    // Clear `self.accumulated_world_dt` when we change settings.
                     if response1.changed() || response2.changed() {
                         self.accumulated_world_dt = 0.0;
                     }
                     ui.label(format!("Current Tick: {}", self.tick));
                     let dt = 1.0 / self.ticks_per_second;
-                    if self.accumulated_world_dt > 2.0 * dt {
-                        // 1 tick errors can naturally occur, and will usually be fixed on the next frame.
+                    if self.accumulated_world_dt > ACCEPTABLE_TICK_ERROR * dt {
+                        // Small errors can naturally occur, and will usually be fixed on the next frame.
+                        // So we only warn when the accumulated error gets larger than 5 ticks.
                         ui.label(
                             egui::RichText::new(format!(
                                 "Lagging {} ticks",
