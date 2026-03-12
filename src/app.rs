@@ -29,34 +29,34 @@ impl App {
         let mut world: World = Default::default();
         world
             .add_body(
-                math::Vec2::new(0.0, 0.0),
-                math::Vec2::new(0.1, 0.0),
-                1.0,
-                math::Shape::Circle(math::Circle::new(0.25).unwrap()),
+                math::Vec2::new(0.0, -1.0),
+                math::Vec2::new(0.2, 0.0),
+                10.0,
+                math::Shape::Circle(math::Circle::new(0.5).unwrap()),
             )
             .unwrap();
         world
             .add_body(
                 math::Vec2::new(1.0, 0.0),
-                math::Vec2::new(0.0, 0.1),
+                math::Vec2::new(0.0, 0.2),
                 1.0,
-                math::Shape::Circle(math::Circle::new(0.15).unwrap()),
+                math::Shape::Circle(math::Circle::new(0.2).unwrap()),
             )
             .unwrap();
         world
             .add_body(
                 math::Vec2::new(0.0, 1.0),
-                math::Vec2::new(0.1, -0.1),
-                1.0,
-                math::Shape::Circle(math::Circle::new(0.15).unwrap()),
+                math::Vec2::new(0.2, -0.2),
+                5.0,
+                math::Shape::Circle(math::Circle::new(0.3).unwrap()),
             )
             .unwrap();
         world
             .add_body(
-                math::Vec2::new(2.0, 2.0),
-                math::Vec2::new(-0.1, 0.0),
-                1.0,
-                math::Shape::Circle(math::Circle::new(0.35).unwrap()),
+                math::Vec2::new(5.0, 2.0),
+                math::Vec2::new(-0.6, 0.0),
+                15.0,
+                math::Shape::Circle(math::Circle::new(1.0).unwrap()),
             )
             .unwrap();
         App {
