@@ -12,6 +12,10 @@ pub struct Engine {}
 struct Contact {
     collider_1: ColliderKey,
     collider_2: ColliderKey,
+    contact_position_1: Vec2,
+    contact_position_2: Vec2,
+    contact_normal: Vec2,
+    penetration_depth: f32, // `(contact_position_2 - contact_position_1).dot(contact_normal) == penetration_depth`
 }
 
 impl Engine {
@@ -68,11 +72,21 @@ impl Engine {
             match (collider_1.shape, collider_2.shape) {
                 (Shape::Circle(circle_1), Shape::Circle(circle_2)) => {
                     let d = body_2.position - body_1.position;
+                    let d_mag = d.length();
+                    let n = if d_mag > f32::EPSILON {
+                        d * (1.0 / d_mag)
+                    } else {
+                        Vec2::RIGHT
+                    };
                     let r = circle_1.radius + circle_2.radius;
-                    if d.length_squared() <= r.powi(2) {
+                    if d_mag <= r {
                         contacts.push(Contact {
                             collider_1: collider_key_1,
                             collider_2: collider_key_2,
+                            contact_position_1: body_1.position + n * circle_1.radius,
+                            contact_position_2: body_2.position + n * circle_2.radius,
+                            contact_normal: n,
+                            penetration_depth: r - d_mag,
                         });
                     }
                 }
