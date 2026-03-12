@@ -20,6 +20,10 @@ impl Vec2 {
     pub fn length_squared(&self) -> f32 {
         self.x.powi(2) + self.y.powi(2)
     }
+
+    pub fn dot(&self, other: &Self) -> f32 {
+        self.x * other.x + self.y * other.y
+    }
 }
 
 impl std::ops::Add for Vec2 {
