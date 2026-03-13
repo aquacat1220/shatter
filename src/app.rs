@@ -203,8 +203,8 @@ impl App {
                     let zoom = SCROLL_DELTA_COEFF * input.smooth_scroll_delta.y
                         + input
                             .multi_touch()
-                            .map_or(0.0, |multi_touch_info| multi_touch_info.zoom_delta);
-                    self.pixels_per_world_unit *= 1.0 + zoom;
+                            .map_or(1.0, |multi_touch_info| multi_touch_info.zoom_delta);
+                    self.pixels_per_world_unit *= zoom;
                 });
             }
 
