@@ -11,6 +11,7 @@ pub struct Engine {
     pgs_steps: u32,
     bounce_threshold: f32,
     bounce_coeff: f32,
+    baumgarte_coeff: f32,
 }
 
 impl Default for Engine {
@@ -19,6 +20,7 @@ impl Default for Engine {
             pgs_steps: 20,
             bounce_threshold: 0.000005,
             bounce_coeff: 0.95,
+            baumgarte_coeff: 0.25,
         }
     }
 }
@@ -32,7 +34,7 @@ struct Contact {
     contact_position_1: Vec2,
     contact_position_2: Vec2,
     contact_normal: Vec2,
-    penetration_depth: f32, // `(contact_position_2 - contact_position_1).dot(contact_normal) == penetration_depth`
+    penetration_depth: f32, // `(contact_position_1 - contact_position_2).dot(contact_normal) == penetration_depth`
 }
 
 impl Engine {
@@ -56,7 +58,7 @@ impl Engine {
                 Event::Contact { body_1, body_2 }
             })
             .collect();
-        self.solve(world, contacts);
+        self.solve(world, contacts, dt);
         self.update_position(world, dt);
 
         events
@@ -114,7 +116,7 @@ impl Engine {
         contacts
     }
 
-    fn solve(&mut self, world: &mut World, contacts: Vec<Contact>) {
+    fn solve(&mut self, world: &mut World, contacts: Vec<Contact>, dt: f32) {
         // We are solving for J M_inv J_T lambda + J v_t + b >= 0
         let mut accumulated_lambdas: Box<[f32]> = vec![0.0; contacts.len()].into_boxed_slice();
         let mut biases: Box<[f32]> = vec![0.0; contacts.len()].into_boxed_slice();
@@ -136,8 +138,13 @@ impl Engine {
                     (body_2.velocity - body_1.velocity).dot(&contact.contact_normal); // The relative velocity along the contact normal. Positive means they are moving away from each other. The m-th row of J v_t.
                 if i == 0 {
                     // Bias calculation should be done only on the first tick to ensure correctness.
+                    // Calculate restitution (bounce) term.
                     if relative_velocity < -self.bounce_threshold {
                         biases[m] += self.bounce_coeff * relative_velocity;
+                    }
+                    // Calculate Baumgarte Stabilization (penetration fix) term.
+                    if contact.penetration_depth > f32::EPSILON {
+                        biases[m] += self.baumgarte_coeff * contact.penetration_depth / dt;
                     }
                     // TODO: Baumgarte Stabilization, predicted collisions, split impulses.
                 }
