@@ -197,13 +197,22 @@ impl App {
                 self.view_center -= world_drag_delta;
             }
 
-            // Scrolling while hovering will zoom in/out.
+            // Scrolling while hovering or multi-touch-pinching will zoom in/out.
+            // Pinching takes priority.
             if response.hovered() {
                 ui.input(|input| {
-                    let zoom = SCROLL_DELTA_COEFF * input.smooth_scroll_delta.y
-                        + input
-                            .multi_touch()
-                            .map_or(1.0, |multi_touch_info| multi_touch_info.zoom_delta);
+                    let mut zoom = 2.0_f32.powf(SCROLL_DELTA_COEFF * input.smooth_scroll_delta.y);
+                    let mut zoom_center = input.pointer.latest_pos();
+                    if let Some(multi_touch_info) = input.multi_touch() {
+                        zoom = multi_touch_info.zoom_delta;
+                        zoom_center = Some(multi_touch_info.center_pos);
+                    }
+                    // let clamped_zoom = f32::clamp(zoom, 0.5, 1.5);
+                    // To ensure we zoom "towards the cursor", move the view center too.
+                    let world_zoom_delta = self.screen_delta_to_world(
+                        zoom_center.unwrap_or(screen_center) - screen_center,
+                    );
+                    self.view_center += world_zoom_delta * (1.0 - (1.0 / zoom));
                     self.pixels_per_world_unit *= zoom;
                 });
             }
