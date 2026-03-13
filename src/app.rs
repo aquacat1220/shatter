@@ -16,8 +16,8 @@ pub struct App {
     world: World,
     engine: Engine,
     events_last_tick: Vec<Event>,
-    view_center: (f32, f32), // The center of view in world coordinates.
-    view_scale: f32, // Pixels per world unit. The larger the value is, the tighter the viewbox gets, the *closer* we see.
+    view_center: math::Vec2,    // The center of view in world coordinates.
+    pixels_per_world_unit: f32, // Pixels per world unit. The larger the value is, the tighter the viewbox gets, the *closer* we see.
 }
 
 impl App {
@@ -69,19 +69,25 @@ impl App {
             world,
             engine: Default::default(),
             events_last_tick: vec![],
-            view_center: (0.0, 0.0),
-            view_scale: 100.0,
+            view_center: math::Vec2::ZERO,
+            pixels_per_world_unit: 100.0,
         }
     }
-}
 
-impl eframe::App for App {
-    /// Called each time the UI needs repainting, which may be many times per second.
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        ctx.set_theme(egui::Theme::Dark);
-        let mut step_this_tick = false;
+    fn screen_delta_to_world(&self, screen_dir: egui::Vec2) -> math::Vec2 {
+        let egui::Vec2 { x: dx, y: dy } = screen_dir;
+        math::Vec2::new(dx, -dy) * (1.0 / self.pixels_per_world_unit)
+    }
 
-        // Draw the control panel window first.
+    fn world_delta_to_screen(&self, world_dir: math::Vec2) -> egui::Vec2 {
+        let math::Vec2 { x: dx, y: dy } = world_dir;
+        egui::Vec2::new(dx, -dy) * self.pixels_per_world_unit
+    }
+
+    /// Draw the control panel to the current egui context, and return if the user requested to "step".
+    fn draw_control_panel(&mut self, ctx: &egui::Context) -> bool {
+        let mut step_requested = false;
+
         let control_panel = egui::Window::new("🗖 Control Panel")
             .hscroll(true)
             .vscroll(true)
@@ -148,7 +154,7 @@ impl eframe::App for App {
                                 )
                                 .clicked()
                             {
-                                step_this_tick = true;
+                                step_requested = true;
                             }
                         },
                     );
@@ -171,10 +177,12 @@ impl eframe::App for App {
                 });
             });
         });
+        step_requested
+    }
 
+    fn draw_world_view(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            let (response, painter) =
-                ui.allocate_painter(ui.available_size(), egui::Sense::empty());
+            let (response, painter) = ui.allocate_painter(ui.available_size(), egui::Sense::drag());
             let rect = response.rect;
             let screen_center = rect.center();
 
@@ -186,19 +194,30 @@ impl eframe::App for App {
                     math::Shape::Circle(circle) => {
                         let world_r = circle.radius;
                         let screen_pos = screen_center
-                            + self.view_scale
-                                * egui::Vec2::new(
-                                    world_pos.x - self.view_center.0,
-                                    -world_pos.y + self.view_center.1,
-                                );
-                        let screen_r = self.view_scale * world_r;
+                            + self.world_delta_to_screen(world_pos - self.view_center);
+                        let screen_r = self.pixels_per_world_unit * world_r;
                         painter.circle(screen_pos, screen_r, color, egui::Stroke::NONE);
                     }
                 }
             }
         });
+    }
 
+    fn tick_engine(&mut self) {
         let dt = 1.0 / self.ticks_per_second;
+        self.events_last_tick = self.engine.tick(&mut self.world, dt);
+        self.tick += 1;
+        self.accumulated_world_dt -= dt;
+    }
+}
+
+impl eframe::App for App {
+    /// Called each time the UI needs repainting, which may be many times per second.
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        ctx.set_theme(egui::Theme::Dark);
+
+        let tick_this_frame = self.draw_control_panel(ctx);
+        self.draw_world_view(ctx);
 
         if !self.paused {
             let real_dt = ctx.input(|i| i.unstable_dt);
@@ -211,18 +230,14 @@ impl eframe::App for App {
 
             // Here, we allow at max `self.max_ticks_per_frame` simulations each frame. Defaults to 1.
             // If `self.accumulated_world_dt` is larger than `dt` (and grows even more), that might mean the engine isn't fast enough.
-
             for _ in 0..=self.max_ticks_per_frame {
-                if self.accumulated_world_dt <= dt {
+                if self.accumulated_world_dt <= 1.0 / self.ticks_per_second {
                     break;
                 }
-                self.events_last_tick = self.engine.tick(&mut self.world, dt);
-                self.tick += 1;
-                self.accumulated_world_dt -= dt;
+                self.tick_engine();
             }
-        } else if step_this_tick {
-            self.events_last_tick = self.engine.tick(&mut self.world, dt);
-            self.tick += 1;
+        } else if tick_this_frame {
+            self.tick_engine();
         }
         ctx.request_repaint();
     }
