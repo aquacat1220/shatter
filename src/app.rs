@@ -4,6 +4,7 @@ use shatter::*;
 
 // We start to display a warning when we lag more than `ACCEPTABLE_TICK_ERROR` ticks behind.
 const ACCEPTABLE_TICK_ERROR: f32 = 5.0;
+const SCROLL_DELTA_COEFF: f32 = 0.005;
 
 #[derive(Debug)]
 pub struct App {
@@ -182,9 +183,27 @@ impl App {
 
     fn draw_world_view(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            let (response, painter) = ui.allocate_painter(ui.available_size(), egui::Sense::drag());
+            let (response, painter) =
+                ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
             let rect = response.rect;
             let screen_center = rect.center();
+
+            // Dragging with left click, middle (scroll) click, or touch will pan the world view.
+            if response.dragged_by(egui::PointerButton::Primary)
+                || response.dragged_by(egui::PointerButton::Middle)
+            {
+                let screen_drag_delta = response.drag_delta();
+                let world_drag_delta = self.screen_delta_to_world(screen_drag_delta);
+                self.view_center -= world_drag_delta;
+            }
+
+            // Scrolling while hovering will zoom in/out.
+            if response.hovered() {
+                ui.input(|input| {
+                    self.pixels_per_world_unit *=
+                        (1.0 + SCROLL_DELTA_COEFF * input.smooth_scroll_delta.y);
+                });
+            }
 
             let color = ctx.style().visuals.warn_fg_color;
 
