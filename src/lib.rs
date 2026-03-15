@@ -9,4 +9,4 @@ pub mod world;
 
 pub use engine::Engine;
 pub use event::Event;
-pub use world::{BodyHandle, BodyView, World};
+pub use world::{Body, BodyHandle, World};

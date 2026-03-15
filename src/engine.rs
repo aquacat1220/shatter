@@ -66,7 +66,7 @@ impl Engine {
 
     fn update_velocity(&mut self, world: &mut World) {
         world.bodies.values_mut().for_each(|body| {
-            body.velocity += body.accumulated_impulse * body.inverse_mass;
+            body.velocity += body.accumulated_impulse * body.mass_inv;
             body.accumulated_impulse = Vec2::ZERO;
         });
     }
@@ -128,7 +128,7 @@ impl Engine {
                     .get_disjoint_mut([contact.body_1, contact.body_2])
                     .unwrap(); // Safety: Narrowphase is guaranteed to generate contacts with valid keys, and we never have self collisions (yet, because bodies only have a single collider).
 
-                let eff_mass = body_1.inverse_mass + body_2.inverse_mass; // The m-th diagonal from the J M_inv J_T matrix.
+                let eff_mass = body_1.mass_inv + body_2.mass_inv; // The m-th diagonal from the J M_inv J_T matrix.
                 if eff_mass <= f32::EPSILON {
                     continue;
                 } // This shouldn't be possible; why would we add collisions between static colliders to the solver? But just to keep things from breaking...
@@ -158,9 +158,9 @@ impl Engine {
 
                 // Apply lambda.
                 body_1.velocity -= // Positive lambda should push bodies away from each other. This means body 2 should go towards normal, and body 1 should do the opposite.
-                    contact.contact_normal * (delta_lambda_clamped * body_1.inverse_mass);
+                    contact.contact_normal * (delta_lambda_clamped * body_1.mass_inv);
                 body_2.velocity +=
-                    contact.contact_normal * (delta_lambda_clamped * body_2.inverse_mass);
+                    contact.contact_normal * (delta_lambda_clamped * body_2.mass_inv);
 
                 accumulated_lambdas[m] = new_accumulated_lambda;
             }
