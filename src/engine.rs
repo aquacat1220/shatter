@@ -31,8 +31,8 @@ struct Contact {
     collider_2: ColliderKey,
     body_1: BodyKey,
     body_2: BodyKey,
-    contact_position_1: Vec2,
-    contact_position_2: Vec2,
+    _contact_position_1: Vec2,
+    _contact_position_2: Vec2,
     contact_normal: Vec2,
     penetration_depth: f32, // `(contact_position_1 - contact_position_2).dot(contact_normal) == penetration_depth`
 }
@@ -104,8 +104,8 @@ impl Engine {
                             collider_2: collider_key_2,
                             body_1: collider_1.body_key,
                             body_2: collider_2.body_key,
-                            contact_position_1: body_1.position + n * circle_1.radius,
-                            contact_position_2: body_2.position + n * circle_2.radius,
+                            _contact_position_1: body_1.position + n * circle_1.radius,
+                            _contact_position_2: body_2.position + n * circle_2.radius,
                             contact_normal: n,
                             penetration_depth: r - d_mag,
                         });
