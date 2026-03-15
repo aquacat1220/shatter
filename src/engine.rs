@@ -144,7 +144,7 @@ impl Engine {
                     }
                     // Calculate Baumgarte Stabilization (penetration fix) term.
                     if contact.penetration_depth > f32::EPSILON {
-                        biases[m] += self.baumgarte_coeff * contact.penetration_depth / dt;
+                        biases[m] -= self.baumgarte_coeff * contact.penetration_depth / dt;
                     }
                     // TODO: Baumgarte Stabilization, predicted collisions, split impulses.
                 }
