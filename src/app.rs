@@ -31,6 +31,7 @@ enum EditMode {
     Pos,
     X,
     Y,
+    Vel,
 }
 
 impl App {
@@ -284,170 +285,212 @@ impl App {
     }
 
     fn draw_body_gizmo(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+        if self.body_to_edit.is_none() {
+            return;
+        }
+        let body_to_edit = self.body_to_edit.unwrap();
         // If we have a body selected for edit, draw a gizmo on top of it.
-        if let Some(body_to_edit) = self.body_to_edit {
-            if let Ok(mut body_to_edit) = self.world.body_mut(body_to_edit) {
-                let body_screen_pos = ui.clip_rect().center()
-                    + Self::world_delta_to_screen(
-                        body_to_edit.position() - self.view_center,
-                        self.pixels_per_world_unit,
-                    );
+        if let Ok(mut body_to_edit) = self.world.body_mut(body_to_edit) {
+            let body_screen_pos = ui.clip_rect().center()
+                + Self::world_delta_to_screen(
+                    body_to_edit.position() - self.view_center,
+                    self.pixels_per_world_unit,
+                );
 
-                let pos_controller_width = BODY_EDITOR_GIZMO_SIZE / 16.0;
-                let arrow_width = BODY_EDITOR_GIZMO_SIZE / 48.0;
-                let arrow_head_size = BODY_EDITOR_GIZMO_SIZE / 24.0;
+            let pos_controller_width = BODY_EDITOR_GIZMO_SIZE / 16.0;
+            let arrow_width = BODY_EDITOR_GIZMO_SIZE / 48.0;
+            let arrow_head_size = BODY_EDITOR_GIZMO_SIZE / 24.0;
+            let vel_controller_width = pos_controller_width;
+            let vel_arrow_width = arrow_width;
 
-                // Compute bounding boxes for gizmo components.
-                let gizmo_rect = egui::Rect::from_center_size(
-                    body_screen_pos,
-                    egui::Vec2::splat(BODY_EDITOR_GIZMO_SIZE),
+            // Compute bounding boxes for gizmo components.
+            let gizmo_rect = egui::Rect::from_center_size(
+                body_screen_pos,
+                egui::Vec2::splat(BODY_EDITOR_GIZMO_SIZE),
+            );
+            let pos_controller_rect = egui::Rect::from_center_size(
+                body_screen_pos,
+                egui::Vec2::splat(pos_controller_width),
+            );
+            let mut y_arrow_rect = egui::Rect::from_center_size(
+                body_screen_pos,
+                egui::Vec2::splat(arrow_head_size * 2.0),
+            );
+            y_arrow_rect.extend_with_y(gizmo_rect.top());
+            let mut x_arrow_rect = egui::Rect::from_center_size(
+                body_screen_pos,
+                egui::Vec2::splat(arrow_head_size * 2.0),
+            );
+            x_arrow_rect.extend_with_x(gizmo_rect.right());
+            let body_screen_pos_after_1s = ui.clip_rect().center()
+                + Self::world_delta_to_screen(
+                    body_to_edit.position() + body_to_edit.velocity() - self.view_center,
+                    self.pixels_per_world_unit,
                 );
-                let pos_controller_rect = egui::Rect::from_center_size(
-                    body_screen_pos,
-                    egui::Vec2::splat(pos_controller_width),
-                );
-                let mut y_arrow_rect = egui::Rect::from_center_size(
-                    body_screen_pos,
-                    egui::Vec2::splat(arrow_head_size * 2.0),
-                );
-                y_arrow_rect.extend_with_y(gizmo_rect.top());
-                let mut x_arrow_rect = egui::Rect::from_center_size(
-                    body_screen_pos,
-                    egui::Vec2::splat(arrow_head_size * 2.0),
-                );
-                x_arrow_rect.extend_with_x(gizmo_rect.right());
+            let vel_controller_rect = egui::Rect::from_center_size(
+                body_screen_pos_after_1s,
+                egui::Vec2::splat(vel_controller_width),
+            );
 
-                // Enable and disable sense based on latest pointer position.
-                let mut sense = egui::Sense::drag();
-                ui.input(|input| {
-                    if let Some(last_pointer_pos) = input.pointer.latest_pos()
-                        && !input.any_touches()
+            // Enable and disable sense based on latest pointer position.
+            let mut sense = egui::Sense::drag();
+            ui.input(|input| {
+                if let Some(last_pointer_pos) = input.pointer.latest_pos()
+                    && !input.any_touches()
+                {
+                    // If we are not on a touch device and have a valid last pointer pos, use it to disable senses when unnecessary.
+                    // This is to allow inputs to pass through transparent regions of the gizmo and affect the world view underneath.
+                    if !pos_controller_rect.contains(last_pointer_pos)
+                        && !y_arrow_rect.contains(last_pointer_pos)
+                        && !x_arrow_rect.contains(last_pointer_pos)
                     {
-                        // If we are not on a touch device and have a valid last pointer pos, use it to disable senses when unnecessary.
-                        // This is to allow inputs to pass through transparent regions of the gizmo and affect the world view underneath.
-                        if !pos_controller_rect.contains(last_pointer_pos)
-                            && !y_arrow_rect.contains(last_pointer_pos)
-                            && !x_arrow_rect.contains(last_pointer_pos)
-                        {
-                            sense = egui::Sense::empty();
-                        }
+                        sense = egui::Sense::empty();
                     }
+                }
+            });
+
+            // Fetch responses and set body edit mode.
+            let response_gizmo = ui.interact(gizmo_rect, ui.next_auto_id(), sense);
+            ui.skip_ahead_auto_ids(1);
+            if response_gizmo.drag_started_by(egui::PointerButton::Primary) {
+                // We have to determine where on the gizmo the drag started.
+                let mut interact_pos: Option<egui::Pos2> = None;
+                ui.input(|input| {
+                    interact_pos = input.pointer.interact_pos();
                 });
+                let interact_pos = interact_pos.unwrap_or(body_screen_pos);
+                let delta_pos = interact_pos - body_screen_pos;
+                if delta_pos.length() <= (pos_controller_width / 2.0) {
+                    // If the drag start pos was close to the position controller, it takes priority.
+                    self.body_edit_mode = EditMode::Pos;
+                } else if delta_pos.y.abs() >= delta_pos.x.abs() {
+                    // Else if, the drag start pos was closer to the y arrow than the x arrow, y arrow takes priority.
+                    self.body_edit_mode = EditMode::Y;
+                } else {
+                    // x arrow takes remaining drag starts.
+                    self.body_edit_mode = EditMode::X;
+                }
+            }
+            if response_gizmo.drag_stopped_by(egui::PointerButton::Primary) {
+                self.body_edit_mode = EditMode::None;
+            }
 
-                // Fetch responses and set body edit mode.
-                let response = ui.interact(gizmo_rect, ui.next_auto_id(), sense);
-                ui.skip_ahead_auto_ids(1);
-                if response.drag_started_by(egui::PointerButton::Primary) {
-                    // We have to determine where on the gizmo the drag started.
-                    let mut interact_pos: Option<egui::Pos2> = None;
+            let response_vel_controller =
+                ui.interact(vel_controller_rect, ui.next_auto_id(), egui::Sense::drag());
+            ui.skip_ahead_auto_ids(1);
+            if response_vel_controller.drag_started_by(egui::PointerButton::Primary) {
+                self.body_edit_mode = EditMode::Vel;
+            }
+            if response_vel_controller.drag_stopped_by(egui::PointerButton::Primary) {
+                self.body_edit_mode = EditMode::None;
+            }
+
+            // Set gizmo color based on edit mode and hover state.
+            let mut pos_controller_color = ctx.style().visuals.gray_out(egui::Color32::YELLOW);
+            let mut y_arrow_color = ctx.style().visuals.gray_out(egui::Color32::GREEN);
+            let mut x_arrow_color = ctx.style().visuals.gray_out(egui::Color32::RED);
+            let mut vel_controller_color = ctx.style().visuals.gray_out(egui::Color32::YELLOW);
+            match self.body_edit_mode {
+                EditMode::Vel => {
+                    vel_controller_color = egui::Color32::YELLOW;
+                }
+                EditMode::Pos => {
+                    pos_controller_color = egui::Color32::YELLOW;
+                }
+                EditMode::Y => {
+                    y_arrow_color = egui::Color32::GREEN;
+                }
+                EditMode::X => {
+                    x_arrow_color = egui::Color32::RED;
+                }
+                EditMode::None => {
+                    let mut latest_pos: Option<egui::Pos2> = None;
                     ui.input(|input| {
-                        interact_pos = input.pointer.interact_pos();
+                        latest_pos = input.pointer.latest_pos();
                     });
-                    let interact_pos = interact_pos.unwrap_or(body_screen_pos);
-                    let delta_pos = interact_pos - body_screen_pos;
-                    if delta_pos.length() <= (pos_controller_width / 2.0) {
-                        // If the drag start pos was close to the position controller, it takes priority.
-                        self.body_edit_mode = EditMode::Pos;
-                    } else if delta_pos.y.abs() >= delta_pos.x.abs() {
-                        // Else if, the drag start pos was closer to the y arrow than the x arrow, y arrow takes priority.
-                        self.body_edit_mode = EditMode::Y;
-                    } else {
-                        // x arrow takes remaining drag starts.
-                        self.body_edit_mode = EditMode::X;
-                    }
-                }
-                if response.drag_stopped_by(egui::PointerButton::Primary) {
-                    self.body_edit_mode = EditMode::None;
-                }
-
-                // Set gizmo color based on edit mode and hover state.
-                let mut pos_controller_color = ctx.style().visuals.gray_out(egui::Color32::YELLOW);
-                let mut y_arrow_color = ctx.style().visuals.gray_out(egui::Color32::GREEN);
-                let mut x_arrow_color = ctx.style().visuals.gray_out(egui::Color32::RED);
-                match self.body_edit_mode {
-                    EditMode::Pos => {
-                        pos_controller_color = egui::Color32::YELLOW;
-                    }
-                    EditMode::Y => {
-                        y_arrow_color = egui::Color32::GREEN;
-                    }
-                    EditMode::X => {
-                        x_arrow_color = egui::Color32::RED;
-                    }
-                    EditMode::None => {
-                        let mut latest_pos: Option<egui::Pos2> = None;
-                        ui.input(|input| {
-                            latest_pos = input.pointer.latest_pos();
-                        });
-                        if let Some(latest_pos) = latest_pos {
-                            if pos_controller_rect.contains(latest_pos) {
-                                pos_controller_color = egui::Color32::YELLOW;
-                            } else if y_arrow_rect.contains(latest_pos) {
-                                y_arrow_color = egui::Color32::GREEN;
-                            } else if x_arrow_rect.contains(latest_pos) {
-                                x_arrow_color = egui::Color32::RED;
-                            }
+                    if let Some(latest_pos) = latest_pos {
+                        if pos_controller_rect.contains(latest_pos) {
+                            pos_controller_color = egui::Color32::YELLOW;
+                        } else if y_arrow_rect.contains(latest_pos) {
+                            y_arrow_color = egui::Color32::GREEN;
+                        } else if x_arrow_rect.contains(latest_pos) {
+                            x_arrow_color = egui::Color32::RED;
+                        } else if vel_controller_rect.contains(latest_pos) {
+                            vel_controller_color = egui::Color32::YELLOW;
                         }
                     }
                 }
-
-                let drag_delta = response.drag_delta();
-                let world_drag_delta =
-                    Self::screen_delta_to_world(drag_delta, self.pixels_per_world_unit);
-                match self.body_edit_mode {
-                    EditMode::Pos => {
-                        *body_to_edit.position_mut() += world_drag_delta;
-                    }
-                    EditMode::Y => {
-                        body_to_edit.position_mut().y += world_drag_delta.y;
-                    }
-                    EditMode::X => {
-                        body_to_edit.position_mut().x += world_drag_delta.x;
-                    }
-                    EditMode::None => {}
-                }
-
-                let painter = ui.painter();
-                // Paint the +y arrow.
-                painter.add(egui::Shape::Path(egui::epaint::PathShape::line(
-                    vec![
-                        body_screen_pos,
-                        gizmo_rect.center_top(),
-                        gizmo_rect.center_top() + egui::Vec2::new(arrow_head_size, arrow_head_size),
-                    ],
-                    egui::epaint::PathStroke::new(arrow_width, y_arrow_color),
-                )));
-                painter.add(egui::Shape::Path(egui::epaint::PathShape::line(
-                    vec![
-                        gizmo_rect.center_top(),
-                        gizmo_rect.center_top()
-                            + egui::Vec2::new(-arrow_head_size, arrow_head_size),
-                    ],
-                    egui::epaint::PathStroke::new(arrow_width, y_arrow_color),
-                )));
-                // Paint the +x arrow.
-                painter.add(egui::Shape::Path(egui::epaint::PathShape::line(
-                    vec![
-                        body_screen_pos,
-                        gizmo_rect.right_center(),
-                        gizmo_rect.right_center()
-                            + egui::Vec2::new(-arrow_head_size, arrow_head_size),
-                    ],
-                    egui::epaint::PathStroke::new(arrow_width, x_arrow_color),
-                )));
-                painter.add(egui::Shape::Path(egui::epaint::PathShape::line(
-                    vec![
-                        gizmo_rect.right_center(),
-                        gizmo_rect.right_center()
-                            + egui::Vec2::new(-arrow_head_size, -arrow_head_size),
-                    ],
-                    egui::epaint::PathStroke::new(arrow_width, x_arrow_color),
-                )));
-                // Paint the 2d position controller. This should come last to show up on the top.
-                painter.rect_filled(pos_controller_rect, 0.0, pos_controller_color);
-            } else {
-                self.body_to_edit = None; // Selected body handle went stale, possibly due to the selected body being removed.
             }
+
+            let gizmo_drag_delta = response_gizmo.drag_delta();
+            let gizmo_world_drag_delta =
+                Self::screen_delta_to_world(gizmo_drag_delta, self.pixels_per_world_unit);
+            let vel_controller_drag_delta = response_vel_controller.drag_delta();
+            let vel_controller_world_drag_delta =
+                Self::screen_delta_to_world(vel_controller_drag_delta, self.pixels_per_world_unit);
+            match self.body_edit_mode {
+                EditMode::Vel => {
+                    println!("{:?}", body_to_edit.velocity());
+                    *body_to_edit.velocity_mut() =
+                        body_to_edit.velocity() + vel_controller_world_drag_delta;
+                    println!("{:?}", body_to_edit.velocity());
+                }
+                EditMode::Pos => {
+                    *body_to_edit.position_mut() += gizmo_world_drag_delta;
+                }
+                EditMode::Y => {
+                    body_to_edit.position_mut().y += gizmo_world_drag_delta.y;
+                }
+                EditMode::X => {
+                    body_to_edit.position_mut().x += gizmo_world_drag_delta.x;
+                }
+                EditMode::None => {}
+            }
+
+            let painter = ui.painter();
+            // Paint the +y arrow.
+            painter.add(egui::Shape::Path(egui::epaint::PathShape::line(
+                vec![
+                    pos_controller_rect.center(),
+                    gizmo_rect.center_top(),
+                    gizmo_rect.center_top() + egui::Vec2::new(arrow_head_size, arrow_head_size),
+                ],
+                egui::epaint::PathStroke::new(arrow_width, y_arrow_color),
+            )));
+            painter.add(egui::Shape::Path(egui::epaint::PathShape::line(
+                vec![
+                    gizmo_rect.center_top(),
+                    gizmo_rect.center_top() + egui::Vec2::new(-arrow_head_size, arrow_head_size),
+                ],
+                egui::epaint::PathStroke::new(arrow_width, y_arrow_color),
+            )));
+            // Paint the +x arrow.
+            painter.add(egui::Shape::Path(egui::epaint::PathShape::line(
+                vec![
+                    pos_controller_rect.center(),
+                    gizmo_rect.right_center(),
+                    gizmo_rect.right_center() + egui::Vec2::new(-arrow_head_size, arrow_head_size),
+                ],
+                egui::epaint::PathStroke::new(arrow_width, x_arrow_color),
+            )));
+            painter.add(egui::Shape::Path(egui::epaint::PathShape::line(
+                vec![
+                    gizmo_rect.right_center(),
+                    gizmo_rect.right_center() + egui::Vec2::new(-arrow_head_size, -arrow_head_size),
+                ],
+                egui::epaint::PathStroke::new(arrow_width, x_arrow_color),
+            )));
+            // Paint the velocity controller.
+            painter.add(egui::Shape::Path(egui::epaint::PathShape::line(
+                vec![pos_controller_rect.center(), vel_controller_rect.center()],
+                egui::epaint::PathStroke::new(vel_arrow_width, vel_controller_color),
+            )));
+            painter.rect_filled(vel_controller_rect, 0.0, vel_controller_color);
+
+            // Paint the 2d position controller. This should come last to show up on the top.
+            painter.rect_filled(pos_controller_rect, 0.0, pos_controller_color);
+        } else {
+            self.body_to_edit = None; // Selected body handle went stale, possibly due to the selected body being removed.
         }
     }
 
