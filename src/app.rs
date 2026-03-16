@@ -390,10 +390,10 @@ impl App {
             }
 
             // Set gizmo color based on edit mode and hover state.
-            let mut pos_controller_color = egui::Color32::YELLOW.gamma_multiply(0.5);
-            let mut y_arrow_color = egui::Color32::GREEN.gamma_multiply(0.5);
-            let mut x_arrow_color = egui::Color32::RED.gamma_multiply(0.5);
-            let mut vel_controller_color = egui::Color32::YELLOW.gamma_multiply(0.5);
+            let mut pos_controller_color = egui::Color32::YELLOW * egui::Color32::GRAY;
+            let mut y_arrow_color = egui::Color32::GREEN * egui::Color32::GRAY;
+            let mut x_arrow_color = egui::Color32::RED * egui::Color32::GRAY;
+            let mut vel_controller_color = egui::Color32::YELLOW * egui::Color32::GRAY;
             match self.body_edit_mode {
                 EditMode::Vel => {
                     vel_controller_color = egui::Color32::YELLOW;
@@ -455,7 +455,7 @@ impl App {
             // Paint the +y arrow.
             painter.add(egui::Shape::Path(egui::epaint::PathShape::line(
                 vec![
-                    pos_controller_rect.center(),
+                    pos_controller_rect.center_top(),
                     gizmo_rect.center_top(),
                     gizmo_rect.center_top() + egui::Vec2::new(arrow_head_size, arrow_head_size),
                 ],
@@ -471,7 +471,7 @@ impl App {
             // Paint the +x arrow.
             painter.add(egui::Shape::Path(egui::epaint::PathShape::line(
                 vec![
-                    pos_controller_rect.center(),
+                    pos_controller_rect.right_center(),
                     gizmo_rect.right_center(),
                     gizmo_rect.right_center() + egui::Vec2::new(-arrow_head_size, arrow_head_size),
                 ],
