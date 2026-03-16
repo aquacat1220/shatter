@@ -1,12 +1,15 @@
 use core::f32;
 
+use egui_taffy::{TuiBuilderLogic, taffy, tui};
 use shatter::*;
 
 // We start to display a warning when we lag more than `ACCEPTABLE_TICK_ERROR` ticks behind.
 const ACCEPTABLE_TICK_ERROR: f32 = 5.0;
 const SCROLL_DELTA_COEFF: f32 = 0.005;
 const CONTROL_PANEL_SIZE: egui::Vec2 = egui::Vec2::new(300.0, 500.0);
-const BODY_EDITOR_GIZMO_SIZE: f32 = 200.0;
+const BODY_EDIT_GIZMO_SIZE: f32 = 200.0;
+const BODY_EDIT_PANEL_SIZE: egui::Vec2 = egui::Vec2::new(250.0, 110.0);
+const BODY_EDIT_PANEL_OFFSET: egui::Vec2 = egui::Vec2::splat(-50.0);
 
 #[derive(Debug)]
 pub struct App {
@@ -280,11 +283,11 @@ impl App {
                 }
             }
 
-            self.draw_body_gizmo(ctx, ui);
+            self.draw_body_edit_gizmo(ui);
         });
     }
 
-    fn draw_body_gizmo(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+    fn draw_body_edit_gizmo(&mut self, ui: &mut egui::Ui) {
         if self.body_to_edit.is_none() {
             return;
         }
@@ -297,16 +300,16 @@ impl App {
                     self.pixels_per_world_unit,
                 );
 
-            let pos_controller_width = BODY_EDITOR_GIZMO_SIZE / 16.0;
-            let arrow_width = BODY_EDITOR_GIZMO_SIZE / 48.0;
-            let arrow_head_size = BODY_EDITOR_GIZMO_SIZE / 24.0;
+            let pos_controller_width = BODY_EDIT_GIZMO_SIZE / 16.0;
+            let arrow_width = BODY_EDIT_GIZMO_SIZE / 48.0;
+            let arrow_head_size = BODY_EDIT_GIZMO_SIZE / 24.0;
             let vel_controller_width = pos_controller_width;
             let vel_arrow_width = arrow_width;
 
             // Compute bounding boxes for gizmo components.
             let gizmo_rect = egui::Rect::from_center_size(
                 body_screen_pos,
-                egui::Vec2::splat(BODY_EDITOR_GIZMO_SIZE),
+                egui::Vec2::splat(BODY_EDIT_GIZMO_SIZE),
             );
             let pos_controller_rect = egui::Rect::from_center_size(
                 body_screen_pos,
@@ -350,8 +353,7 @@ impl App {
             });
 
             // Fetch responses and set body edit mode.
-            let response_gizmo = ui.interact(gizmo_rect, ui.next_auto_id(), sense);
-            ui.skip_ahead_auto_ids(1);
+            let response_gizmo = ui.interact(gizmo_rect, ui.id().with("gizmo"), sense);
             if response_gizmo.drag_started_by(egui::PointerButton::Primary) {
                 // We have to determine where on the gizmo the drag started.
                 let mut interact_pos: Option<egui::Pos2> = None;
@@ -375,9 +377,11 @@ impl App {
                 self.body_edit_mode = EditMode::None;
             }
 
-            let response_vel_controller =
-                ui.interact(vel_controller_rect, ui.next_auto_id(), egui::Sense::drag());
-            ui.skip_ahead_auto_ids(1);
+            let response_vel_controller = ui.interact(
+                vel_controller_rect,
+                ui.id().with("vel_controller"),
+                egui::Sense::drag(),
+            );
             if response_vel_controller.drag_started_by(egui::PointerButton::Primary) {
                 self.body_edit_mode = EditMode::Vel;
             }
@@ -386,10 +390,10 @@ impl App {
             }
 
             // Set gizmo color based on edit mode and hover state.
-            let mut pos_controller_color = ctx.style().visuals.gray_out(egui::Color32::YELLOW);
-            let mut y_arrow_color = ctx.style().visuals.gray_out(egui::Color32::GREEN);
-            let mut x_arrow_color = ctx.style().visuals.gray_out(egui::Color32::RED);
-            let mut vel_controller_color = ctx.style().visuals.gray_out(egui::Color32::YELLOW);
+            let mut pos_controller_color = egui::Color32::YELLOW.gamma_multiply(0.5);
+            let mut y_arrow_color = egui::Color32::GREEN.gamma_multiply(0.5);
+            let mut x_arrow_color = egui::Color32::RED.gamma_multiply(0.5);
+            let mut vel_controller_color = egui::Color32::YELLOW.gamma_multiply(0.5);
             match self.body_edit_mode {
                 EditMode::Vel => {
                     vel_controller_color = egui::Color32::YELLOW;
@@ -494,6 +498,187 @@ impl App {
         }
     }
 
+    fn draw_body_edit_panel(&mut self, ctx: &egui::Context) {
+        if self.body_to_edit.is_none() {
+            return;
+        }
+        let body_to_edit = self.body_to_edit.unwrap();
+        let body_to_edit = self.world.body_mut(body_to_edit);
+        if body_to_edit.is_err() {
+            self.body_to_edit = None;
+            return;
+        }
+        let mut body_to_edit = body_to_edit.unwrap();
+        let body_edit_panel = egui::Window::new("🗖 Body Edit Panel")
+            .fixed_size(BODY_EDIT_PANEL_SIZE)
+            .title_bar(false)
+            .resizable(false)
+            .anchor(egui::Align2::RIGHT_BOTTOM, BODY_EDIT_PANEL_OFFSET);
+        body_edit_panel.show(ctx, |ui| {
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+            tui(ui, ui.id().with("body_edit_panel"))
+                .reserve_available_space()
+                .style(taffy::Style {
+                    flex_direction: taffy::FlexDirection::Column,
+                    align_items: Some(taffy::AlignItems::Stretch),
+                    justify_content: Some(taffy::AlignContent::Center),
+                    size: taffy::Size {
+                        width: taffy::style_helpers::percent(1.0),
+                        height: taffy::style_helpers::percent(1.0),
+                    },
+                    padding: taffy::style_helpers::length(4.0),
+                    gap: taffy::style_helpers::length(4.0),
+                    ..Default::default()
+                })
+                .show(|tui| {
+                    // Position row.
+                    tui.style(taffy::Style {
+                        flex_direction: taffy::FlexDirection::Row,
+                        align_items: Some(taffy::AlignItems::Stretch),
+                        justify_content: Some(taffy::AlignContent::SpaceBetween),
+                        padding: taffy::style_helpers::length(4.0),
+                        gap: taffy::style_helpers::length(8.0),
+                        ..Default::default()
+                    })
+                    .add_with_border(|tui| {
+                        tui.style(taffy::Style {
+                            size: taffy::Size {
+                                width: taffy::style_helpers::length(10.0),
+                                height: taffy::style_helpers::auto(),
+                            },
+                            ..Default::default()
+                        })
+                        .label("x");
+                        tui.style(taffy::Style {
+                            flex_grow: 1.0,
+                            ..Default::default()
+                        })
+                        .ui(|ui| {
+                            let drag_value =
+                                egui::DragValue::new(&mut body_to_edit.position_mut().x)
+                                    .min_decimals(2);
+                            ui.add_sized(ui.available_size(), drag_value);
+                        });
+                        tui.separator();
+                        tui.style(taffy::Style {
+                            size: taffy::Size {
+                                width: taffy::style_helpers::length(10.0),
+                                height: taffy::style_helpers::auto(),
+                            },
+                            ..Default::default()
+                        })
+                        .label("y");
+                        tui.style(taffy::Style {
+                            flex_grow: 1.0,
+                            ..Default::default()
+                        })
+                        .ui(|ui| {
+                            let drag_value =
+                                egui::DragValue::new(&mut body_to_edit.position_mut().y)
+                                    .min_decimals(2);
+                            ui.add_sized(ui.available_size(), drag_value);
+                        });
+                    });
+                    // Velocity row.
+                    tui.style(taffy::Style {
+                        flex_direction: taffy::FlexDirection::Row,
+                        align_items: Some(taffy::AlignItems::Stretch),
+                        justify_content: Some(taffy::AlignContent::SpaceBetween),
+                        padding: taffy::style_helpers::length(4.0),
+                        gap: taffy::style_helpers::length(8.0),
+                        ..Default::default()
+                    })
+                    .add_with_border(|tui| {
+                        tui.style(taffy::Style {
+                            size: taffy::Size {
+                                width: taffy::style_helpers::length(10.0),
+                                height: taffy::style_helpers::auto(),
+                            },
+                            ..Default::default()
+                        })
+                        .label("vx");
+                        tui.style(taffy::Style {
+                            flex_grow: 1.0,
+                            ..Default::default()
+                        })
+                        .ui(|ui| {
+                            let drag_value =
+                                egui::DragValue::new(&mut body_to_edit.velocity_mut().x)
+                                    .min_decimals(2);
+                            ui.add_sized(ui.available_size(), drag_value);
+                        });
+                        tui.separator();
+                        tui.style(taffy::Style {
+                            size: taffy::Size {
+                                width: taffy::style_helpers::length(10.0),
+                                height: taffy::style_helpers::auto(),
+                            },
+                            ..Default::default()
+                        })
+                        .label("vy");
+                        tui.style(taffy::Style {
+                            flex_grow: 1.0,
+                            ..Default::default()
+                        })
+                        .ui(|ui| {
+                            let drag_value =
+                                egui::DragValue::new(&mut body_to_edit.velocity_mut().y)
+                                    .min_decimals(2);
+                            ui.add_sized(ui.available_size(), drag_value);
+                        });
+                    });
+                    // Impulse row.
+                    tui.style(taffy::Style {
+                        flex_direction: taffy::FlexDirection::Row,
+                        align_items: Some(taffy::AlignItems::Center),
+                        justify_content: Some(taffy::AlignContent::SpaceBetween),
+                        padding: taffy::style_helpers::length(4.0),
+                        gap: taffy::style_helpers::length(8.0),
+                        ..Default::default()
+                    })
+                    .add_with_border(|tui| {
+                        tui.style(taffy::Style {
+                            size: taffy::Size {
+                                width: taffy::style_helpers::length(10.0),
+                                height: taffy::style_helpers::auto(),
+                            },
+                            ..Default::default()
+                        })
+                        .label("fx");
+                        tui.style(taffy::Style {
+                            flex_grow: 1.0,
+                            ..Default::default()
+                        })
+                        .ui(|ui| {
+                            let drag_value =
+                                egui::DragValue::new(&mut body_to_edit.accumulated_impulse_mut().x)
+                                    .min_decimals(2);
+                            ui.add_sized(ui.available_size(), drag_value);
+                        });
+                        tui.separator();
+                        tui.style(taffy::Style {
+                            size: taffy::Size {
+                                width: taffy::style_helpers::length(10.0),
+                                height: taffy::style_helpers::auto(),
+                            },
+                            ..Default::default()
+                        })
+                        .label("fy");
+                        tui.style(taffy::Style {
+                            flex_grow: 1.0,
+                            ..Default::default()
+                        })
+                        .ui(|ui| {
+                            let drag_value =
+                                egui::DragValue::new(&mut body_to_edit.accumulated_impulse_mut().y)
+                                    .min_decimals(2);
+                            ui.add_sized(ui.available_size(), drag_value);
+                        });
+                    });
+                });
+        });
+    }
+
     fn tick_engine(&mut self) {
         let dt = 1.0 / self.ticks_per_second;
         self.events_last_tick = self.engine.tick(&mut self.world, dt);
@@ -509,6 +694,7 @@ impl eframe::App for App {
 
         let tick_this_frame = self.draw_control_panel(ctx);
         self.draw_world_view(ctx);
+        self.draw_body_edit_panel(ctx);
 
         if !self.paused {
             let real_dt = ctx.input(|i| i.unstable_dt);
