@@ -221,7 +221,7 @@ impl App {
     }
 
     fn draw_world_viewer(&mut self, ctx: &egui::Context) {
-        let response = egui::CentralPanel::default().show(ctx, |ui| {
+        let _response = egui::CentralPanel::default().show(ctx, |ui| {
             let response = ui.interact(
                 ui.clip_rect(),
                 ui.next_auto_id(),
@@ -276,8 +276,9 @@ impl App {
             }
 
             // Fetch colors for the bodies / gizmos.
-            let body_color = ctx.style().visuals.weak_text_color();
-            let selected_body_color = ctx.style().visuals.text_color();
+            let body_color = egui::Color32::from_rgba_unmultiplied(128, 128, 128, 255);
+            let selected_body_color = egui::Color32::from_rgba_unmultiplied(168, 168, 168, 255);
+            let grid_color = egui::Color32::from_rgba_unmultiplied(128, 128, 128, 255);
 
             Self::draw_world(
                 ui,
@@ -287,6 +288,7 @@ impl App {
                 self.body_to_edit,
                 body_color,
                 selected_body_color,
+                grid_color,
             );
 
             self.draw_body_editor_gizmo(ui);
@@ -425,7 +427,7 @@ impl App {
                                         .min_decimals(2);
                                 ui.add_sized(ui.available_size(), drag_value)
                             },
-                            |mut response, ui| {
+                            |mut response, _ui| {
                                 let rect = response.min_size;
                                 response.min_size = egui::Vec2::new(10.0, rect.y);
                                 response.max_size = egui::Vec2::new(10.0, rect.y);
@@ -454,7 +456,7 @@ impl App {
                                         .min_decimals(2);
                                 ui.add_sized(ui.available_size(), drag_value)
                             },
-                            |mut response, ui| {
+                            |mut response, _ui| {
                                 let rect = response.min_size;
                                 response.min_size = egui::Vec2::new(10.0, rect.y);
                                 response.max_size = egui::Vec2::new(10.0, rect.y);
@@ -493,7 +495,7 @@ impl App {
                                         .min_decimals(2);
                                 ui.add_sized(ui.available_size(), drag_value)
                             },
-                            |mut response, ui| {
+                            |mut response, _ui| {
                                 let rect = response.min_size;
                                 response.min_size = egui::Vec2::new(10.0, rect.y);
                                 response.max_size = egui::Vec2::new(10.0, rect.y);
@@ -522,7 +524,7 @@ impl App {
                                         .min_decimals(2);
                                 ui.add_sized(ui.available_size(), drag_value)
                             },
-                            |mut response, ui| {
+                            |mut response, _ui| {
                                 let rect = response.min_size;
                                 response.min_size = egui::Vec2::new(10.0, rect.y);
                                 response.max_size = egui::Vec2::new(10.0, rect.y);
@@ -562,7 +564,7 @@ impl App {
                                 .min_decimals(2);
                                 ui.add_sized(ui.available_size(), drag_value)
                             },
-                            |mut response, ui| {
+                            |mut response, _ui| {
                                 let rect = response.min_size;
                                 response.min_size = egui::Vec2::new(10.0, rect.y);
                                 response.max_size = egui::Vec2::new(10.0, rect.y);
@@ -592,7 +594,7 @@ impl App {
                                 .min_decimals(2);
                                 ui.add_sized(ui.available_size(), drag_value)
                             },
-                            |mut response, ui| {
+                            |mut response, _ui| {
                                 let rect = response.min_size;
                                 response.min_size = egui::Vec2::new(10.0, rect.y);
                                 response.max_size = egui::Vec2::new(10.0, rect.y);
@@ -634,6 +636,10 @@ impl App {
                     });
                 }
 
+                let body_color = egui::Color32::from_rgba_unmultiplied(128, 128, 128, 255);
+                let selected_body_color = egui::Color32::from_rgba_unmultiplied(168, 168, 168, 255);
+                let grid_color = egui::Color32::from_rgba_unmultiplied(128, 128, 128, 255);
+
                 // And use `Self::draw_world()` to draw the world into `ui`.
                 Self::draw_world(
                     ui,
@@ -641,8 +647,9 @@ impl App {
                     math::Vec2::ZERO,
                     self.pixels_per_body_creator_world_unit,
                     None,
-                    ctx.style().visuals.text_color(),
-                    ctx.style().visuals.text_color(),
+                    body_color,
+                    selected_body_color,
+                    grid_color,
                 );
 
                 // And draw gizmos over the world view to change size.
@@ -685,7 +692,7 @@ impl App {
             .unwrap(); // Safety: Never `None` because the window cannot be closed.
         let body_creator_window_rect = response.response.rect;
 
-        if let Some(inner) = response.inner
+        if let Some(_inner) = response.inner
         // Pattern matching passes only when window wasn't collapsed.
         // && inner.hovered()
         {
@@ -753,7 +760,7 @@ impl App {
                                                     .min_decimals(2);
                                             ui.add_sized(ui.available_size(), drag_value)
                                         },
-                                        |mut response, ui| {
+                                        |mut response, _ui| {
                                             let rect = response.min_size;
                                             response.min_size = egui::Vec2::new(10.0, rect.y);
                                             response.max_size = egui::Vec2::new(10.0, rect.y);
@@ -793,7 +800,7 @@ impl App {
                                     }
                                     response
                                 },
-                                |mut response, ui| {
+                                |mut response, _ui| {
                                     let rect = response.min_size;
                                     response.min_size = egui::Vec2::new(10.0, rect.y);
                                     response.max_size = egui::Vec2::new(10.0, rect.y);
@@ -816,8 +823,9 @@ impl App {
         selected_body: Option<BodyHandle>,
         body_color: egui::Color32,
         selected_body_color: egui::Color32,
+        grid_color: egui::Color32,
     ) {
-        let ui_center = ui.clip_rect().center();
+        let rect = ui.clip_rect();
         let painter = ui.painter();
         // Render bodies in the world view.
         for body_handle in world.body_handles() {
@@ -831,7 +839,7 @@ impl App {
             match body.shape() {
                 math::Shape::Circle(circle) => {
                     let world_r = circle.radius;
-                    let screen_pos = ui_center
+                    let screen_pos = rect.center()
                         + Self::world_delta_to_screen(
                             world_pos - view_center,
                             pixels_per_world_unit,
@@ -840,6 +848,79 @@ impl App {
                     painter.circle(screen_pos, screen_r, body_color, egui::Stroke::NONE);
                 }
             }
+        }
+        Self::draw_grid(
+            ui,
+            view_center,
+            pixels_per_world_unit,
+            250.0,
+            egui::Stroke::new(1.0, grid_color),
+        );
+        Self::draw_grid(
+            ui,
+            view_center,
+            pixels_per_world_unit,
+            25.0,
+            egui::Stroke::new(0.5, grid_color * egui::Color32::GRAY),
+        );
+    }
+
+    fn draw_grid(
+        ui: &egui::Ui,
+        view_center: math::Vec2,
+        pixels_per_world_unit: f32,
+        target_screen_line_distance: f32,
+        stroke: egui::Stroke,
+    ) {
+        let rect = ui.clip_rect();
+        let painter = ui.painter();
+        let world_spacing = target_screen_line_distance / pixels_per_world_unit;
+        let exponent = world_spacing.log10().ceil();
+        let grid_step = 10.0_f32.powf(exponent);
+
+        // 2. Calculate the visible range in world coordinates
+        let egui::Vec2 {
+            x: width_screen,
+            y: height_screen,
+        } = rect.size();
+        let world_width = width_screen / pixels_per_world_unit;
+        let world_height = height_screen / pixels_per_world_unit;
+
+        let world_min = view_center - math::Vec2::new(world_width / 2.0, world_height / 2.0);
+        let world_max = view_center + math::Vec2::new(world_width / 2.0, world_height / 2.0);
+
+        // 3. Snap the start points to the grid_step
+        let start_x = (world_min.x / grid_step).floor() * grid_step;
+        let start_y = (world_min.y / grid_step).floor() * grid_step;
+
+        // Draw Vertical Lines
+        let mut x = start_x;
+        while x <= world_max.x {
+            let dx_screen = (x - view_center.x) * pixels_per_world_unit;
+            let screen_x = rect.center().x + dx_screen;
+            painter.line_segment(
+                [
+                    egui::Pos2::new(screen_x, rect.top()),
+                    egui::Pos2::new(screen_x, rect.bottom()),
+                ],
+                stroke,
+            );
+            x += grid_step;
+        }
+
+        // Draw Horizontal Lines
+        let mut y = start_y;
+        while y <= world_max.y {
+            let dy = (y - view_center.y) * pixels_per_world_unit;
+            let screen_y = rect.center().y - dy;
+            painter.line_segment(
+                [
+                    egui::Pos2::new(rect.left(), screen_y),
+                    egui::Pos2::new(rect.right(), screen_y),
+                ],
+                stroke,
+            );
+            y += grid_step;
         }
     }
 
