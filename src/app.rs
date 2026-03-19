@@ -764,6 +764,44 @@ impl App {
                                 }
                             }
                         });
+                        tui.style(taffy::Style {
+                            flex_direction: taffy::FlexDirection::Row,
+                            align_items: Some(taffy::AlignItems::Stretch),
+                            justify_content: Some(taffy::AlignContent::SpaceBetween),
+                            padding: taffy::style_helpers::length(4.0),
+                            gap: taffy::style_helpers::length(8.0),
+                            ..Default::default()
+                        })
+                        .add_with_border(|tui| {
+                            tui.style(taffy::Style {
+                                flex_grow: 1.0,
+                                ..Default::default()
+                            })
+                            .ui_add_manual(
+                                |ui| {
+                                    let button = egui::Button::new("Add Body To Scene");
+                                    let response = ui.add_sized(ui.available_size(), button);
+                                    if response.clicked() {
+                                        self.world
+                                            .add_body(
+                                                self.view_center,
+                                                math::Vec2::ZERO,
+                                                1.0 / body_mut.mass_inv(),
+                                                body_mut.shape(),
+                                            )
+                                            .unwrap();
+                                    }
+                                    response
+                                },
+                                |mut response, ui| {
+                                    let rect = response.min_size;
+                                    response.min_size = egui::Vec2::new(10.0, rect.y);
+                                    response.max_size = egui::Vec2::new(10.0, rect.y);
+                                    response.infinite = egui::Vec2b::new(true, false);
+                                    response
+                                },
+                            );
+                        });
                     });
             });
         }
