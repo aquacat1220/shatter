@@ -6,35 +6,45 @@ use shatter::*;
 // We start to display a warning when we lag more than `ACCEPTABLE_TICK_ERROR` ticks behind.
 const ACCEPTABLE_TICK_ERROR: f32 = 5.0;
 const SCROLL_DELTA_COEFF: f32 = 0.005;
-const CONTROL_PANEL_SIZE: egui::Vec2 = egui::Vec2::new(300.0, 500.0);
-const BODY_EDIT_GIZMO_SIZE: f32 = 200.0;
-const BODY_EDIT_PANEL_SIZE: egui::Vec2 = egui::Vec2::new(250.0, 110.0);
-const BODY_EDIT_PANEL_OFFSET: egui::Vec2 = egui::Vec2::splat(-50.0);
+
+const ENGINE_CONTROLLER_SIZE: egui::Vec2 = egui::Vec2::new(300.0, 500.0);
+
+const BODY_EDITOR_GIZMO_SIZE: f32 = 200.0;
+const BODY_EDITOR_PANEL_WIDTH: f32 = 300.0;
+const BODY_EDITOR_PANEL_OFFSET: egui::Vec2 = egui::Vec2::splat(-50.0);
+
+const BODY_CREATOR_SIZE: egui::Vec2 = egui::Vec2::new(500.0, 500.0);
+const BODY_CREATOR_PANEL_WIDTH: f32 = 250.0;
+const BODY_CREATOR_PANEL_OFFSET: egui::Vec2 = egui::Vec2::splat(-50.0);
+
+const AXES_WIDTH: f32 = BODY_EDITOR_GIZMO_SIZE / 48.0;
+const AXES_HEAD_WIDTH: f32 = BODY_EDITOR_GIZMO_SIZE / 24.0;
+const HANDLE_WIDTH: f32 = AXES_WIDTH;
+const HANDLE_HEAD_WIDTH: f32 = BODY_EDITOR_GIZMO_SIZE / 16.0;
 
 #[derive(Debug)]
 pub struct App {
+    // Begin engine configuration.
+    engine: Engine,
     tick: u32,
     ticks_per_second: f32,
     speed: f32, // speed multiplier
     paused: bool,
     max_ticks_per_frame: u32,
     accumulated_world_dt: f32,
+    // End engine configuration.
+    // Begin world configuration.
     world: World,
-    engine: Engine,
     events_last_tick: Vec<Event>,
     view_center: math::Vec2,    // The center of view in world coordinates.
     pixels_per_world_unit: f32, // Pixels per world unit. The larger the value is, the tighter the viewbox gets, the *closer* we see.
     body_to_edit: Option<BodyHandle>,
-    body_edit_mode: EditMode,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum EditMode {
-    None,
-    Pos,
-    X,
-    Y,
-    Vel,
+    // End world configuration.
+    // Begin body creator world configuration.
+    body_creator_world: World,
+    pixels_per_body_creator_world_unit: f32,
+    // TODO: After adding multi-collider support, we will need an `Option<ColliderHandle>` to keep track of the target collider.
+    // End body creator world configuration.
 }
 
 impl App {
@@ -76,7 +86,18 @@ impl App {
                 math::Shape::Circle(math::Circle::new(1.0).unwrap()),
             )
             .unwrap();
+
+        let mut body_creator_world: World = Default::default();
+        body_creator_world
+            .add_body(
+                math::Vec2::ZERO,
+                math::Vec2::ZERO,
+                1.0,
+                math::Shape::Circle(math::Circle::new(1.0).unwrap()),
+            )
+            .unwrap();
         App {
+            engine: Default::default(),
             tick: 0,
             ticks_per_second: 100.0,
             speed: 1.0,
@@ -84,12 +105,12 @@ impl App {
             max_ticks_per_frame: 1,
             accumulated_world_dt: 0.0,
             world,
-            engine: Default::default(),
             events_last_tick: vec![],
             view_center: math::Vec2::ZERO,
             pixels_per_world_unit: 100.0,
             body_to_edit: None,
-            body_edit_mode: EditMode::None,
+            body_creator_world,
+            pixels_per_body_creator_world_unit: 100.0,
         }
     }
 
@@ -103,15 +124,15 @@ impl App {
         egui::Vec2::new(dx, -dy) * pixels_per_world_unit
     }
 
-    /// Draw the control panel to the current egui context, and return if the user requested to "step".
-    fn draw_control_panel(&mut self, ctx: &egui::Context) -> bool {
+    /// Draw the engine controller to the current egui context, and return if the user requested to "step".
+    fn draw_engine_controller(&mut self, ctx: &egui::Context) -> bool {
         let mut step_requested = false;
 
-        let control_panel = egui::Window::new("🗖 Control Panel")
+        let engine_controller = egui::Window::new("⚙ Engine Controller")
             .hscroll(true)
             .vscroll(true)
-            .fixed_size(CONTROL_PANEL_SIZE);
-        control_panel.show(ctx, |ui| {
+            .fixed_size(ENGINE_CONTROLLER_SIZE);
+        engine_controller.show(ctx, |ui| {
             ui.spacing_mut().item_spacing.y = 10.0;
             ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| {
                 // Statistics section.
@@ -199,16 +220,15 @@ impl App {
         step_requested
     }
 
-    fn draw_world_view(&mut self, ctx: &egui::Context) {
-        egui::CentralPanel::default().show(ctx, |ui| {
+    fn draw_world_viewer(&mut self, ctx: &egui::Context) {
+        let response = egui::CentralPanel::default().show(ctx, |ui| {
             let response = ui.interact(
                 ui.clip_rect(),
                 ui.next_auto_id(),
                 egui::Sense::click_and_drag(),
             );
             ui.skip_ahead_auto_ids(1);
-            let world_view_rect = response.rect;
-            let screen_center = world_view_rect.center();
+            let screen_center = ui.clip_rect().center();
 
             // Left clicking a body will select it for editing.
             if response.clicked_by(egui::PointerButton::Primary) {
@@ -259,35 +279,28 @@ impl App {
             let body_color = ctx.style().visuals.weak_text_color();
             let selected_body_color = ctx.style().visuals.text_color();
 
-            let painter = ui.painter();
-            // Render bodies in the world view.
-            for body_handle in self.world.body_handles() {
-                let body = self.world.body(body_handle).unwrap();
-                let world_pos = body.position();
-                let body_color = if Some(body.handle()) == self.body_to_edit {
-                    selected_body_color
-                } else {
-                    body_color
-                };
-                match body.shape() {
-                    math::Shape::Circle(circle) => {
-                        let world_r = circle.radius;
-                        let screen_pos = screen_center
-                            + Self::world_delta_to_screen(
-                                world_pos - self.view_center,
-                                self.pixels_per_world_unit,
-                            );
-                        let screen_r = self.pixels_per_world_unit * world_r;
-                        painter.circle(screen_pos, screen_r, body_color, egui::Stroke::NONE);
-                    }
-                }
-            }
+            Self::draw_world(
+                ui,
+                &self.world,
+                self.view_center,
+                self.pixels_per_world_unit,
+                self.body_to_edit,
+                body_color,
+                selected_body_color,
+            );
 
-            self.draw_body_edit_gizmo(ui);
+            self.draw_body_editor_gizmo(ui);
+
+            response
         });
+
+        if response.inner.hovered() {
+            println!("HOVERED");
+            self.draw_body_editor_panel(ctx);
+        }
     }
 
-    fn draw_body_edit_gizmo(&mut self, ui: &mut egui::Ui) {
+    fn draw_body_editor_gizmo(&mut self, ui: &mut egui::Ui) {
         if self.body_to_edit.is_none() {
             return;
         }
@@ -299,206 +312,50 @@ impl App {
                     body_to_edit.position() - self.view_center,
                     self.pixels_per_world_unit,
                 );
+            let body_screen_vel =
+                Self::world_delta_to_screen(body_to_edit.velocity(), self.pixels_per_world_unit);
 
-            let pos_controller_width = BODY_EDIT_GIZMO_SIZE / 16.0;
-            let arrow_width = BODY_EDIT_GIZMO_SIZE / 48.0;
-            let arrow_head_size = BODY_EDIT_GIZMO_SIZE / 24.0;
-            let vel_controller_width = pos_controller_width;
-            let vel_arrow_width = arrow_width;
-
-            // Compute bounding boxes for gizmo components.
-            let gizmo_rect = egui::Rect::from_center_size(
+            let position_screen_delta = Self::draw_axes(
+                ui,
                 body_screen_pos,
-                egui::Vec2::splat(BODY_EDIT_GIZMO_SIZE),
+                egui::Vec2::splat(BODY_EDITOR_GIZMO_SIZE),
+                AXES_WIDTH,
+                AXES_HEAD_WIDTH,
+                egui::Color32::GREEN * egui::Color32::GRAY,
+                egui::Color32::GREEN,
+                egui::Color32::RED * egui::Color32::GRAY,
+                egui::Color32::RED,
             );
-            let pos_controller_rect = egui::Rect::from_center_size(
+            let velocity_screen_delta = Self::draw_handle(
+                ui,
                 body_screen_pos,
-                egui::Vec2::splat(pos_controller_width),
+                body_screen_vel,
+                HANDLE_WIDTH,
+                HANDLE_HEAD_WIDTH,
+                egui::Color32::YELLOW * egui::Color32::GRAY,
+                egui::Color32::YELLOW,
             );
-            let mut y_arrow_rect = egui::Rect::from_center_size(
-                body_screen_pos,
-                egui::Vec2::splat(arrow_head_size * 2.0),
-            );
-            y_arrow_rect.extend_with_y(gizmo_rect.top());
-            let mut x_arrow_rect = egui::Rect::from_center_size(
-                body_screen_pos,
-                egui::Vec2::splat(arrow_head_size * 2.0),
-            );
-            x_arrow_rect.extend_with_x(gizmo_rect.right());
-            let body_screen_pos_after_1s = ui.clip_rect().center()
-                + Self::world_delta_to_screen(
-                    body_to_edit.position() + body_to_edit.velocity() - self.view_center,
-                    self.pixels_per_world_unit,
+            let position_screen_delta = position_screen_delta
+                + Self::draw_handle(
+                    ui,
+                    body_screen_pos,
+                    egui::Vec2::ZERO,
+                    HANDLE_WIDTH,
+                    HANDLE_HEAD_WIDTH,
+                    egui::Color32::YELLOW * egui::Color32::GRAY,
+                    egui::Color32::YELLOW,
                 );
-            let vel_controller_rect = egui::Rect::from_center_size(
-                body_screen_pos_after_1s,
-                egui::Vec2::splat(vel_controller_width),
-            );
 
-            // Enable and disable sense based on latest pointer position.
-            let mut sense = egui::Sense::drag();
-            ui.input(|input| {
-                if let Some(last_pointer_pos) = input.pointer.latest_pos()
-                    && !input.any_touches()
-                {
-                    // If we are not on a touch device and have a valid last pointer pos, use it to disable senses when unnecessary.
-                    // This is to allow inputs to pass through transparent regions of the gizmo and affect the world view underneath.
-                    if !pos_controller_rect.contains(last_pointer_pos)
-                        && !y_arrow_rect.contains(last_pointer_pos)
-                        && !x_arrow_rect.contains(last_pointer_pos)
-                    {
-                        sense = egui::Sense::empty();
-                    }
-                }
-            });
-
-            // Fetch responses and set body edit mode.
-            let response_gizmo = ui.interact(gizmo_rect, ui.id().with("gizmo"), sense);
-            if response_gizmo.drag_started_by(egui::PointerButton::Primary) {
-                // We have to determine where on the gizmo the drag started.
-                let mut interact_pos: Option<egui::Pos2> = None;
-                ui.input(|input| {
-                    interact_pos = input.pointer.interact_pos();
-                });
-                let interact_pos = interact_pos.unwrap_or(body_screen_pos);
-                let delta_pos = interact_pos - body_screen_pos;
-                if delta_pos.length() <= (pos_controller_width / 2.0) {
-                    // If the drag start pos was close to the position controller, it takes priority.
-                    self.body_edit_mode = EditMode::Pos;
-                } else if delta_pos.y.abs() >= delta_pos.x.abs() {
-                    // Else if, the drag start pos was closer to the y arrow than the x arrow, y arrow takes priority.
-                    self.body_edit_mode = EditMode::Y;
-                } else {
-                    // x arrow takes remaining drag starts.
-                    self.body_edit_mode = EditMode::X;
-                }
-            }
-            if response_gizmo.drag_stopped_by(egui::PointerButton::Primary) {
-                self.body_edit_mode = EditMode::None;
-            }
-
-            let response_vel_controller = ui.interact(
-                vel_controller_rect,
-                ui.id().with("vel_controller"),
-                egui::Sense::drag(),
-            );
-            if response_vel_controller.drag_started_by(egui::PointerButton::Primary) {
-                self.body_edit_mode = EditMode::Vel;
-            }
-            if response_vel_controller.drag_stopped_by(egui::PointerButton::Primary) {
-                self.body_edit_mode = EditMode::None;
-            }
-
-            // Set gizmo color based on edit mode and hover state.
-            let mut pos_controller_color = egui::Color32::YELLOW * egui::Color32::GRAY;
-            let mut y_arrow_color = egui::Color32::GREEN * egui::Color32::GRAY;
-            let mut x_arrow_color = egui::Color32::RED * egui::Color32::GRAY;
-            let mut vel_controller_color = egui::Color32::YELLOW * egui::Color32::GRAY;
-            match self.body_edit_mode {
-                EditMode::Vel => {
-                    vel_controller_color = egui::Color32::YELLOW;
-                }
-                EditMode::Pos => {
-                    pos_controller_color = egui::Color32::YELLOW;
-                }
-                EditMode::Y => {
-                    y_arrow_color = egui::Color32::GREEN;
-                }
-                EditMode::X => {
-                    x_arrow_color = egui::Color32::RED;
-                }
-                EditMode::None => {
-                    let mut latest_pos: Option<egui::Pos2> = None;
-                    ui.input(|input| {
-                        latest_pos = input.pointer.latest_pos();
-                    });
-                    if let Some(latest_pos) = latest_pos {
-                        if pos_controller_rect.contains(latest_pos) {
-                            pos_controller_color = egui::Color32::YELLOW;
-                        } else if y_arrow_rect.contains(latest_pos) {
-                            y_arrow_color = egui::Color32::GREEN;
-                        } else if x_arrow_rect.contains(latest_pos) {
-                            x_arrow_color = egui::Color32::RED;
-                        } else if vel_controller_rect.contains(latest_pos) {
-                            vel_controller_color = egui::Color32::YELLOW;
-                        }
-                    }
-                }
-            }
-
-            let gizmo_drag_delta = response_gizmo.drag_delta();
-            let gizmo_world_drag_delta =
-                Self::screen_delta_to_world(gizmo_drag_delta, self.pixels_per_world_unit);
-            let vel_controller_drag_delta = response_vel_controller.drag_delta();
-            let vel_controller_world_drag_delta =
-                Self::screen_delta_to_world(vel_controller_drag_delta, self.pixels_per_world_unit);
-            match self.body_edit_mode {
-                EditMode::Vel => {
-                    println!("{:?}", body_to_edit.velocity());
-                    *body_to_edit.velocity_mut() =
-                        body_to_edit.velocity() + vel_controller_world_drag_delta;
-                    println!("{:?}", body_to_edit.velocity());
-                }
-                EditMode::Pos => {
-                    *body_to_edit.position_mut() += gizmo_world_drag_delta;
-                }
-                EditMode::Y => {
-                    body_to_edit.position_mut().y += gizmo_world_drag_delta.y;
-                }
-                EditMode::X => {
-                    body_to_edit.position_mut().x += gizmo_world_drag_delta.x;
-                }
-                EditMode::None => {}
-            }
-
-            let painter = ui.painter();
-            // Paint the +y arrow.
-            painter.add(egui::Shape::Path(egui::epaint::PathShape::line(
-                vec![
-                    pos_controller_rect.center_top(),
-                    gizmo_rect.center_top(),
-                    gizmo_rect.center_top() + egui::Vec2::new(arrow_head_size, arrow_head_size),
-                ],
-                egui::epaint::PathStroke::new(arrow_width, y_arrow_color),
-            )));
-            painter.add(egui::Shape::Path(egui::epaint::PathShape::line(
-                vec![
-                    gizmo_rect.center_top(),
-                    gizmo_rect.center_top() + egui::Vec2::new(-arrow_head_size, arrow_head_size),
-                ],
-                egui::epaint::PathStroke::new(arrow_width, y_arrow_color),
-            )));
-            // Paint the +x arrow.
-            painter.add(egui::Shape::Path(egui::epaint::PathShape::line(
-                vec![
-                    pos_controller_rect.right_center(),
-                    gizmo_rect.right_center(),
-                    gizmo_rect.right_center() + egui::Vec2::new(-arrow_head_size, arrow_head_size),
-                ],
-                egui::epaint::PathStroke::new(arrow_width, x_arrow_color),
-            )));
-            painter.add(egui::Shape::Path(egui::epaint::PathShape::line(
-                vec![
-                    gizmo_rect.right_center(),
-                    gizmo_rect.right_center() + egui::Vec2::new(-arrow_head_size, -arrow_head_size),
-                ],
-                egui::epaint::PathStroke::new(arrow_width, x_arrow_color),
-            )));
-            // Paint the velocity controller.
-            painter.add(egui::Shape::Path(egui::epaint::PathShape::line(
-                vec![pos_controller_rect.center(), vel_controller_rect.center()],
-                egui::epaint::PathStroke::new(vel_arrow_width, vel_controller_color),
-            )));
-            painter.rect_filled(vel_controller_rect, 0.0, vel_controller_color);
-
-            // Paint the 2d position controller. This should come last to show up on the top.
-            painter.rect_filled(pos_controller_rect, 0.0, pos_controller_color);
+            *body_to_edit.position_mut() +=
+                Self::screen_delta_to_world(position_screen_delta, self.pixels_per_world_unit);
+            *body_to_edit.velocity_mut() +=
+                Self::screen_delta_to_world(velocity_screen_delta, self.pixels_per_world_unit);
         } else {
             self.body_to_edit = None; // Selected body handle went stale, possibly due to the selected body being removed.
         }
     }
 
-    fn draw_body_edit_panel(&mut self, ctx: &egui::Context) {
+    fn draw_body_editor_panel(&mut self, ctx: &egui::Context) {
         if self.body_to_edit.is_none() {
             return;
         }
@@ -509,22 +366,30 @@ impl App {
             return;
         }
         let mut body_to_edit = body_to_edit.unwrap();
-        let body_edit_panel = egui::Window::new("🗖 Body Edit Panel")
-            .fixed_size(BODY_EDIT_PANEL_SIZE)
+        let body_edit_panel = egui::Window::new("⌖ Body Editor Panel")
+            // .fixed_size(BODY_EDITOR_PANEL_SIZE)
+            .max_width(BODY_EDITOR_PANEL_WIDTH)
             .title_bar(false)
             .resizable(false)
-            .anchor(egui::Align2::RIGHT_BOTTOM, BODY_EDIT_PANEL_OFFSET);
+            .anchor(egui::Align2::RIGHT_BOTTOM, BODY_EDITOR_PANEL_OFFSET)
+            .order(egui::Order::Foreground);
         body_edit_panel.show(ctx, |ui| {
             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-            tui(ui, ui.id().with("body_edit_panel"))
-                .reserve_available_space()
+            let id = ui.id().with("body_edit_panel");
+            let available_width = ui.available_width();
+            tui(ui, id)
+                // .reserve_available_space()
+                .with_available_space(taffy::Size {
+                    width: taffy::AvailableSpace::Definite(available_width),
+                    height: taffy::AvailableSpace::MaxContent,
+                })
                 .style(taffy::Style {
                     flex_direction: taffy::FlexDirection::Column,
                     align_items: Some(taffy::AlignItems::Stretch),
                     justify_content: Some(taffy::AlignContent::Center),
                     size: taffy::Size {
-                        width: taffy::style_helpers::percent(1.0),
-                        height: taffy::style_helpers::percent(1.0),
+                        width: taffy::style_helpers::percent(1.),
+                        height: taffy::style_helpers::auto(),
                     },
                     padding: taffy::style_helpers::length(4.0),
                     gap: taffy::style_helpers::length(4.0),
@@ -543,7 +408,7 @@ impl App {
                     .add_with_border(|tui| {
                         tui.style(taffy::Style {
                             size: taffy::Size {
-                                width: taffy::style_helpers::length(10.0),
+                                width: taffy::style_helpers::length(30.0),
                                 height: taffy::style_helpers::auto(),
                             },
                             ..Default::default()
@@ -553,16 +418,26 @@ impl App {
                             flex_grow: 1.0,
                             ..Default::default()
                         })
-                        .ui(|ui| {
-                            let drag_value =
-                                egui::DragValue::new(&mut body_to_edit.position_mut().x)
-                                    .min_decimals(2);
-                            ui.add_sized(ui.available_size(), drag_value);
-                        });
+                        .ui_add_manual(
+                            |ui| {
+                                let drag_value =
+                                    egui::DragValue::new(&mut body_to_edit.position_mut().x)
+                                        .speed(0.01)
+                                        .min_decimals(2);
+                                ui.add_sized(ui.available_size(), drag_value)
+                            },
+                            |mut response, ui| {
+                                let rect = response.min_size;
+                                response.min_size = egui::Vec2::new(10.0, rect.y);
+                                response.max_size = egui::Vec2::new(10.0, rect.y);
+                                response.infinite = egui::Vec2b::new(true, false);
+                                response
+                            },
+                        );
                         tui.separator();
                         tui.style(taffy::Style {
                             size: taffy::Size {
-                                width: taffy::style_helpers::length(10.0),
+                                width: taffy::style_helpers::length(30.0),
                                 height: taffy::style_helpers::auto(),
                             },
                             ..Default::default()
@@ -572,12 +447,22 @@ impl App {
                             flex_grow: 1.0,
                             ..Default::default()
                         })
-                        .ui(|ui| {
-                            let drag_value =
-                                egui::DragValue::new(&mut body_to_edit.position_mut().y)
-                                    .min_decimals(2);
-                            ui.add_sized(ui.available_size(), drag_value);
-                        });
+                        .ui_add_manual(
+                            |ui| {
+                                let drag_value =
+                                    egui::DragValue::new(&mut body_to_edit.position_mut().y)
+                                        .speed(0.01)
+                                        .min_decimals(2);
+                                ui.add_sized(ui.available_size(), drag_value)
+                            },
+                            |mut response, ui| {
+                                let rect = response.min_size;
+                                response.min_size = egui::Vec2::new(10.0, rect.y);
+                                response.max_size = egui::Vec2::new(10.0, rect.y);
+                                response.infinite = egui::Vec2b::new(true, false);
+                                response
+                            },
+                        );
                     });
                     // Velocity row.
                     tui.style(taffy::Style {
@@ -591,7 +476,7 @@ impl App {
                     .add_with_border(|tui| {
                         tui.style(taffy::Style {
                             size: taffy::Size {
-                                width: taffy::style_helpers::length(10.0),
+                                width: taffy::style_helpers::length(30.0),
                                 height: taffy::style_helpers::auto(),
                             },
                             ..Default::default()
@@ -601,16 +486,26 @@ impl App {
                             flex_grow: 1.0,
                             ..Default::default()
                         })
-                        .ui(|ui| {
-                            let drag_value =
-                                egui::DragValue::new(&mut body_to_edit.velocity_mut().x)
-                                    .min_decimals(2);
-                            ui.add_sized(ui.available_size(), drag_value);
-                        });
+                        .ui_add_manual(
+                            |ui| {
+                                let drag_value =
+                                    egui::DragValue::new(&mut body_to_edit.velocity_mut().x)
+                                        .speed(0.01)
+                                        .min_decimals(2);
+                                ui.add_sized(ui.available_size(), drag_value)
+                            },
+                            |mut response, ui| {
+                                let rect = response.min_size;
+                                response.min_size = egui::Vec2::new(10.0, rect.y);
+                                response.max_size = egui::Vec2::new(10.0, rect.y);
+                                response.infinite = egui::Vec2b::new(true, false);
+                                response
+                            },
+                        );
                         tui.separator();
                         tui.style(taffy::Style {
                             size: taffy::Size {
-                                width: taffy::style_helpers::length(10.0),
+                                width: taffy::style_helpers::length(30.0),
                                 height: taffy::style_helpers::auto(),
                             },
                             ..Default::default()
@@ -620,12 +515,22 @@ impl App {
                             flex_grow: 1.0,
                             ..Default::default()
                         })
-                        .ui(|ui| {
-                            let drag_value =
-                                egui::DragValue::new(&mut body_to_edit.velocity_mut().y)
-                                    .min_decimals(2);
-                            ui.add_sized(ui.available_size(), drag_value);
-                        });
+                        .ui_add_manual(
+                            |ui| {
+                                let drag_value =
+                                    egui::DragValue::new(&mut body_to_edit.velocity_mut().y)
+                                        .speed(0.01)
+                                        .min_decimals(2);
+                                ui.add_sized(ui.available_size(), drag_value)
+                            },
+                            |mut response, ui| {
+                                let rect = response.min_size;
+                                response.min_size = egui::Vec2::new(10.0, rect.y);
+                                response.max_size = egui::Vec2::new(10.0, rect.y);
+                                response.infinite = egui::Vec2b::new(true, false);
+                                response
+                            },
+                        );
                     });
                     // Impulse row.
                     tui.style(taffy::Style {
@@ -639,7 +544,7 @@ impl App {
                     .add_with_border(|tui| {
                         tui.style(taffy::Style {
                             size: taffy::Size {
-                                width: taffy::style_helpers::length(10.0),
+                                width: taffy::style_helpers::length(30.0),
                                 height: taffy::style_helpers::auto(),
                             },
                             ..Default::default()
@@ -649,16 +554,27 @@ impl App {
                             flex_grow: 1.0,
                             ..Default::default()
                         })
-                        .ui(|ui| {
-                            let drag_value =
-                                egui::DragValue::new(&mut body_to_edit.accumulated_impulse_mut().x)
-                                    .min_decimals(2);
-                            ui.add_sized(ui.available_size(), drag_value);
-                        });
+                        .ui_add_manual(
+                            |ui| {
+                                let drag_value = egui::DragValue::new(
+                                    &mut body_to_edit.accumulated_impulse_mut().x,
+                                )
+                                .speed(0.01)
+                                .min_decimals(2);
+                                ui.add_sized(ui.available_size(), drag_value)
+                            },
+                            |mut response, ui| {
+                                let rect = response.min_size;
+                                response.min_size = egui::Vec2::new(10.0, rect.y);
+                                response.max_size = egui::Vec2::new(10.0, rect.y);
+                                response.infinite = egui::Vec2b::new(true, false);
+                                response
+                            },
+                        );
                         tui.separator();
                         tui.style(taffy::Style {
                             size: taffy::Size {
-                                width: taffy::style_helpers::length(10.0),
+                                width: taffy::style_helpers::length(30.0),
                                 height: taffy::style_helpers::auto(),
                             },
                             ..Default::default()
@@ -668,15 +584,353 @@ impl App {
                             flex_grow: 1.0,
                             ..Default::default()
                         })
-                        .ui(|ui| {
-                            let drag_value =
-                                egui::DragValue::new(&mut body_to_edit.accumulated_impulse_mut().y)
-                                    .min_decimals(2);
-                            ui.add_sized(ui.available_size(), drag_value);
-                        });
+                        .ui_add_manual(
+                            |ui| {
+                                let drag_value = egui::DragValue::new(
+                                    &mut body_to_edit.accumulated_impulse_mut().y,
+                                )
+                                .speed(0.01)
+                                .min_decimals(2);
+                                ui.add_sized(ui.available_size(), drag_value)
+                            },
+                            |mut response, ui| {
+                                let rect = response.min_size;
+                                response.min_size = egui::Vec2::new(10.0, rect.y);
+                                response.max_size = egui::Vec2::new(10.0, rect.y);
+                                response.infinite = egui::Vec2b::new(true, false);
+                                response
+                            },
+                        );
                     });
                 });
         });
+    }
+
+    fn draw_body_creator(&mut self, ctx: &egui::Context) {
+        let body_creator = egui::Window::new("⌖ Body Creator")
+            .hscroll(true)
+            .vscroll(true)
+            .fixed_size(BODY_CREATOR_SIZE);
+        let response = body_creator
+            .show(ctx, |ui| {
+                // Fetch input responses to zoom and pan world view.
+                let response = ui.interact(
+                    ui.clip_rect(),
+                    ui.next_auto_id(),
+                    egui::Sense::click_and_drag(),
+                );
+                ui.skip_ahead_auto_ids(1);
+
+                // Scrolling while hovering or multi-touch-pinching will zoom in/out.
+                // Pinching takes priority.
+                // Note how we don't care about zoom center, cuz the view center is fixed to the origin.
+                if response.hovered() {
+                    ui.input(|input| {
+                        let mut zoom =
+                            2.0_f32.powf(SCROLL_DELTA_COEFF * input.smooth_scroll_delta.y);
+                        if let Some(multi_touch_info) = input.multi_touch() {
+                            zoom = multi_touch_info.zoom_delta;
+                        }
+                        self.pixels_per_body_creator_world_unit *= zoom;
+                    });
+                }
+
+                // And use `Self::draw_world()` to draw the world into `ui`.
+                Self::draw_world(
+                    ui,
+                    &self.body_creator_world,
+                    math::Vec2::ZERO,
+                    self.pixels_per_body_creator_world_unit,
+                    None,
+                    ctx.style().visuals.text_color(),
+                    ctx.style().visuals.text_color(),
+                );
+
+                // And draw gizmos over the world view to change size.
+                // Currently we only allow bodies to have a single collider. No more, no less.
+                // The user can either select the collider and change its size, or select nothing and edit bounce coefficients and mass.
+
+                let body_handle = self.body_creator_world.body_handles().next().unwrap();
+                let mut body_mut = self.body_creator_world.body_mut(body_handle).unwrap();
+                let mut size_world = math::Vec2::ONES;
+                match body_mut.shape() {
+                    math::Shape::Circle(circle) => {
+                        size_world *= circle.radius;
+                    }
+                }
+                let size_in_screen = Self::world_delta_to_screen(
+                    size_world,
+                    self.pixels_per_body_creator_world_unit,
+                );
+                let size_delta_screen = Self::draw_handle(
+                    ui,
+                    ui.clip_rect().center(),
+                    size_in_screen,
+                    HANDLE_WIDTH,
+                    HANDLE_HEAD_WIDTH,
+                    egui::Color32::YELLOW * egui::Color32::GRAY,
+                    egui::Color32::YELLOW,
+                );
+                let size_delta_world = Self::screen_delta_to_world(
+                    size_delta_screen,
+                    self.pixels_per_body_creator_world_unit,
+                );
+                match body_mut.shape_mut() {
+                    math::Shape::Circle(circle) => {
+                        circle.radius = f32::max(f32::EPSILON, circle.radius + size_delta_world.x);
+                    }
+                }
+
+                response
+            })
+            .unwrap(); // Safety: Never `None` because the window cannot be closed.
+        let body_creator_window_rect = response.response.rect;
+
+        if let Some(inner) = response.inner // Pattern matching passes only when window wasn't collapsed.
+            && inner.hovered()
+        {
+            // Draw a numeric panel only when the body creator is not collapsed.
+            let body_creator_panel = egui::Window::new("⌖ Body Creator Panel")
+                .max_width(BODY_CREATOR_PANEL_WIDTH)
+                .title_bar(false)
+                .resizable(false)
+                .pivot(egui::Align2::RIGHT_BOTTOM)
+                .fixed_pos(body_creator_window_rect.right_bottom() + BODY_CREATOR_PANEL_OFFSET)
+                .order(egui::Order::Foreground);
+            body_creator_panel.show(ctx, |ui| {
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                let id = ui.id().with("body_creator_panel");
+                let available_width = ui.available_width();
+                let body_handle = self.body_creator_world.body_handles().next().unwrap();
+                let mut body_mut = self.body_creator_world.body_mut(body_handle).unwrap();
+                tui(ui, id)
+                    .with_available_space(taffy::Size {
+                        width: taffy::AvailableSpace::Definite(available_width),
+                        height: taffy::AvailableSpace::MaxContent,
+                    })
+                    .style(taffy::Style {
+                        flex_direction: taffy::FlexDirection::Column,
+                        align_items: Some(taffy::AlignItems::Stretch),
+                        justify_content: Some(taffy::AlignContent::Center),
+                        size: taffy::Size {
+                            width: taffy::style_helpers::percent(1.),
+                            height: taffy::style_helpers::auto(),
+                        },
+                        padding: taffy::style_helpers::length(4.0),
+                        gap: taffy::style_helpers::length(4.0),
+                        ..Default::default()
+                    })
+                    .show(|tui| {
+                        tui.style(taffy::Style {
+                            flex_direction: taffy::FlexDirection::Row,
+                            align_items: Some(taffy::AlignItems::Stretch),
+                            justify_content: Some(taffy::AlignContent::SpaceBetween),
+                            padding: taffy::style_helpers::length(4.0),
+                            gap: taffy::style_helpers::length(8.0),
+                            ..Default::default()
+                        })
+                        .add_with_border(|tui| {
+                            match body_mut.shape_mut() {
+                                math::Shape::Circle(circle) => {
+                                    tui.style(taffy::Style {
+                                        size: taffy::Size {
+                                            width: taffy::style_helpers::length(30.0),
+                                            height: taffy::style_helpers::auto(),
+                                        },
+                                        ..Default::default()
+                                    })
+                                    .label("r");
+                                    tui.style(taffy::Style {
+                                        flex_grow: 1.0,
+                                        ..Default::default()
+                                    })
+                                    .ui_add_manual(
+                                        |ui| {
+                                            let drag_value =
+                                                egui::DragValue::new(&mut circle.radius)
+                                                    .range(f32::EPSILON..=f32::INFINITY)
+                                                    .speed(0.01)
+                                                    .min_decimals(2);
+                                            ui.add_sized(ui.available_size(), drag_value)
+                                        },
+                                        |mut response, ui| {
+                                            let rect = response.min_size;
+                                            response.min_size = egui::Vec2::new(10.0, rect.y);
+                                            response.max_size = egui::Vec2::new(10.0, rect.y);
+                                            response.infinite = egui::Vec2b::new(true, false);
+                                            response
+                                        },
+                                    );
+                                }
+                            }
+                        });
+                    });
+            });
+        }
+    }
+
+    /// Draw the world inside provided ui.
+    fn draw_world(
+        ui: &mut egui::Ui,
+        world: &World,
+        view_center: math::Vec2,
+        pixels_per_world_unit: f32,
+        selected_body: Option<BodyHandle>,
+        body_color: egui::Color32,
+        selected_body_color: egui::Color32,
+    ) {
+        let ui_center = ui.clip_rect().center();
+        let painter = ui.painter();
+        // Render bodies in the world view.
+        for body_handle in world.body_handles() {
+            let body = world.body(body_handle).unwrap();
+            let world_pos = body.position();
+            let body_color = if Some(body.handle()) == selected_body {
+                selected_body_color
+            } else {
+                body_color
+            };
+            match body.shape() {
+                math::Shape::Circle(circle) => {
+                    let world_r = circle.radius;
+                    let screen_pos = ui_center
+                        + Self::world_delta_to_screen(
+                            world_pos - view_center,
+                            pixels_per_world_unit,
+                        );
+                    let screen_r = pixels_per_world_unit * world_r;
+                    painter.circle(screen_pos, screen_r, body_color, egui::Stroke::NONE);
+                }
+            }
+        }
+    }
+
+    fn draw_axes(
+        ui: &mut egui::Ui,
+        screen_pos: egui::Pos2,
+        screen_size: egui::Vec2,
+        arrow_width: f32,
+        arrow_head_width: f32,
+        color_y: egui::Color32,
+        color_y_dragged: egui::Color32,
+        color_x: egui::Color32,
+        color_x_dragged: egui::Color32,
+    ) -> egui::Vec2 {
+        let mut delta = egui::Vec2::ZERO;
+        let mut color_y = color_y;
+        let mut color_x = color_x;
+
+        // Compute rects.
+        let y_arrow_end = screen_pos + egui::Vec2::UP * screen_size.y.abs();
+        let mut y_arrow_rect = egui::Rect::from_center_size(
+            y_arrow_end,
+            egui::Vec2::splat(f32::max(arrow_width, arrow_head_width)),
+        );
+        y_arrow_rect.extend_with(screen_pos);
+        let x_arrow_end = screen_pos + egui::Vec2::RIGHT * screen_size.x.abs();
+        let mut x_arrow_rect = egui::Rect::from_center_size(
+            x_arrow_end,
+            egui::Vec2::splat(f32::max(arrow_width, arrow_head_width)),
+        );
+        x_arrow_rect.extend_with(screen_pos);
+
+        // Fetch input responses.
+        let id_y = ui.next_auto_id();
+        ui.skip_ahead_auto_ids(1);
+        let id_x = ui.next_auto_id();
+        ui.skip_ahead_auto_ids(1);
+        let response_y = ui.interact(y_arrow_rect, id_y, egui::Sense::drag());
+        let response_x = ui.interact(x_arrow_rect, id_x, egui::Sense::drag());
+        if response_y.dragged_by(egui::PointerButton::Primary) {
+            delta.y = response_y.drag_delta().y;
+            color_y = color_y_dragged;
+        }
+        if response_y.hovered() {
+            color_y = color_y_dragged;
+        }
+        if response_x.dragged_by(egui::PointerButton::Primary) {
+            delta.x = response_x.drag_delta().x;
+            color_x = color_x_dragged;
+        }
+        if response_x.hovered() {
+            color_x = color_x_dragged;
+        }
+
+        let painter = ui.painter();
+        // Paint the +y arrow to ui.
+        painter.add(egui::Shape::Path(egui::epaint::PathShape::line(
+            vec![
+                screen_pos,
+                y_arrow_end,
+                y_arrow_end + egui::Vec2::new(arrow_head_width, arrow_head_width),
+            ],
+            egui::epaint::PathStroke::new(arrow_width, color_y),
+        )));
+        painter.add(egui::Shape::Path(egui::epaint::PathShape::line(
+            vec![
+                y_arrow_end,
+                y_arrow_end + egui::Vec2::new(-arrow_head_width, arrow_head_width),
+            ],
+            egui::epaint::PathStroke::new(arrow_width, color_y),
+        )));
+        // Paint the +x arrow to ui.
+        painter.add(egui::Shape::Path(egui::epaint::PathShape::line(
+            vec![
+                screen_pos,
+                x_arrow_end,
+                x_arrow_end + egui::Vec2::new(-arrow_head_width, arrow_head_width),
+            ],
+            egui::epaint::PathStroke::new(arrow_width, color_x),
+        )));
+        painter.add(egui::Shape::Path(egui::epaint::PathShape::line(
+            vec![
+                x_arrow_end,
+                x_arrow_end + egui::Vec2::new(-arrow_head_width, -arrow_head_width),
+            ],
+            egui::epaint::PathStroke::new(arrow_width, color_x),
+        )));
+        delta
+    }
+
+    fn draw_handle(
+        ui: &mut egui::Ui,
+        screen_pos: egui::Pos2,
+        screen_dir: egui::Vec2,
+        handle_width: f32,
+        handle_head_width: f32,
+        color: egui::Color32,
+        color_dragged: egui::Color32,
+    ) -> egui::Vec2 {
+        let mut delta = egui::Vec2::ZERO;
+        let mut color = color;
+
+        // Compute rect.
+        let handle_head_rect = egui::Rect::from_center_size(
+            screen_pos + screen_dir,
+            egui::Vec2::splat(handle_head_width),
+        );
+
+        // Fetch input responses.
+        let id = ui.next_auto_id();
+        ui.skip_ahead_auto_ids(1);
+        let response = ui.interact(handle_head_rect, id, egui::Sense::drag());
+        if response.hovered() {
+            color = color_dragged;
+        }
+        if response.dragged_by(egui::PointerButton::Primary) {
+            delta = response.drag_delta();
+            color = color_dragged;
+        }
+
+        // Paint handle to ui.
+        let painter = ui.painter();
+        painter.add(egui::Shape::Path(egui::epaint::PathShape::line(
+            vec![screen_pos, screen_pos + screen_dir],
+            egui::epaint::PathStroke::new(handle_width, color),
+        )));
+        painter.rect_filled(handle_head_rect, 0.0, color);
+
+        delta
     }
 
     fn tick_engine(&mut self) {
@@ -692,9 +946,9 @@ impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.set_theme(egui::Theme::Dark);
 
-        let tick_this_frame = self.draw_control_panel(ctx);
-        self.draw_world_view(ctx);
-        self.draw_body_edit_panel(ctx);
+        let tick_this_frame = self.draw_engine_controller(ctx);
+        self.draw_world_viewer(ctx);
+        self.draw_body_creator(ctx);
 
         if !self.paused {
             let real_dt = ctx.input(|i| i.unstable_dt);
