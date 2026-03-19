@@ -815,6 +815,7 @@ impl App {
     }
 
     /// Draw the world inside provided ui.
+    #[allow(clippy::too_many_arguments)]
     fn draw_world(
         ui: &mut egui::Ui,
         world: &World,
@@ -924,6 +925,7 @@ impl App {
         }
     }
 
+    #[allow(clippy::too_many_arguments)] // Adding a separate struct for arguments will be dirtier...
     fn draw_axes(
         ui: &mut egui::Ui,
         screen_pos: egui::Pos2,
