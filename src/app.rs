@@ -294,10 +294,9 @@ impl App {
             response
         });
 
-        if response.inner.hovered() {
-            println!("HOVERED");
-            self.draw_body_editor_panel(ctx);
-        }
+        // if response.inner.hovered() {
+        self.draw_body_editor_panel(ctx);
+        // }
     }
 
     fn draw_body_editor_gizmo(&mut self, ui: &mut egui::Ui) {
@@ -686,8 +685,9 @@ impl App {
             .unwrap(); // Safety: Never `None` because the window cannot be closed.
         let body_creator_window_rect = response.response.rect;
 
-        if let Some(inner) = response.inner // Pattern matching passes only when window wasn't collapsed.
-            && inner.hovered()
+        if let Some(inner) = response.inner
+        // Pattern matching passes only when window wasn't collapsed.
+        // && inner.hovered()
         {
             // Draw a numeric panel only when the body creator is not collapsed.
             let body_creator_panel = egui::Window::new("⌖ Body Creator Panel")
